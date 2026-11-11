@@ -100,7 +100,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
         for (const e of active()) {
           const abs = base + countIn + e.t;
           if (abs < scheduled || abs >= horizon) continue;
-          playNote(e.midi, t0 + abs * spb(), e.d * spb() * 0.95, e.hand === 'L' ? 0.6 : 0.78);
+          playNote(e.midi, t0 + abs * spb(), e.d * spb(), e.hand === 'L' ? 0.58 : 0.78, 0.16);
         }
       }
     }

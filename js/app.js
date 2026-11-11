@@ -144,11 +144,15 @@ async function playSample(el) {
   const { from, bars, bpm } = sampleBars(piece);
   const a = from * p.barBeats;
   const b = a + bars * p.barBeats;
-  const ev = p.events.filter((e) => e.t >= a - 1e-6 && e.t < b - 1e-6).map((e) => ({ ...e, t: e.t - a, d: Math.min(e.d, b - e.t) }));
-  const first = Math.min(...ev.map((e) => e.t));
-  ev.forEach((e) => { e.t -= first; });
+  const ev = p.events.filter((e) => e.t >= a - 1e-6 && e.t < b - 1e-6).map((e) => ({ ...e, t: e.t - a }));
+  const skip = Math.min(...ev.map((e) => e.t)); // start on the first note, not on a leading rest
   el.classList.add('on');
-  stopSampleFn = playEvents(ev, bpm, () => { el.classList.remove('on'); stopSampleFn = null; });
+  stopSampleFn = playEvents(ev, bpm, () => { el.classList.remove('on'); stopSampleFn = null; }, {
+    musical: true,
+    skip,
+    barBeats: p.barBeats,
+    pedalBeats: TRACK_INFO[piece.track].pedal ? p.barBeats : 0,
+  });
 }
 
 function genreList(selected) {

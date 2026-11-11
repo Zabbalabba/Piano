@@ -1,5 +1,7 @@
 // The exercise repertoire.
 //
+// Genres marked pedal: true have their samples played with the sustain pedal, as is usual for them.
+//
 // Every item: id, t (title), lv (1 beginner .. 3 early intermediate), bpm (target, in quarter
 // notes), optional ts / key / swing, rh / lh in the notation described in music.js,
 // focus (what it trains and why it is here) and tip (how to practise it).
@@ -8,19 +10,19 @@
 import { pat, seq, rep, bars, scaleNotes } from './music.js';
 
 export const GENRES = [
-  { id: 'classical', name: 'Classical', blurb: 'Clear melodies, even fingers, Alberti bass.' },
+  { id: 'classical', pedal: true, name: 'Classical', blurb: 'Clear melodies, even fingers, Alberti bass.' },
   { id: 'jazz', name: 'Jazz', blurb: 'Swing feel, shell voicings, ii–V–I.' },
   { id: 'blues', name: 'Blues & Boogie-woogie', blurb: '12-bar form, shuffle, blues scale.' },
   { id: 'ragtime', name: 'Ragtime & Stride', blurb: 'Oom-pah left hand, syncopated right.' },
-  { id: 'pop', name: 'Pop', blurb: 'Four-chord songs, broken chords, steady pulse.' },
+  { id: 'pop', pedal: true, name: 'Pop', blurb: 'Four-chord songs, broken chords, steady pulse.' },
   { id: 'rock', name: 'Rock', blurb: 'Power chords, driving eighths, riffs.' },
-  { id: 'gospel', name: 'Gospel', blurb: 'Rich cadences, walk-ups, 12/8 feel.' },
-  { id: 'rnb', name: 'R&B & Soul', blurb: 'Seventh chords, backbeat, slow grooves.' },
+  { id: 'gospel', pedal: true, name: 'Gospel', blurb: 'Rich cadences, walk-ups, 12/8 feel.' },
+  { id: 'rnb', pedal: true, name: 'R&B & Soul', blurb: 'Seventh chords, backbeat, slow grooves.' },
   { id: 'funk', name: 'Funk', blurb: 'Tight off-beats and locking in on the one.' },
   { id: 'latin', name: 'Latin', blurb: 'Bossa nova, habanera and montuno patterns.' },
-  { id: 'folk', name: 'Folk & Singer-songwriter', blurb: 'Open chords, waltz time, song accompaniment.' },
+  { id: 'folk', pedal: true, name: 'Folk & Singer-songwriter', blurb: 'Open chords, waltz time, song accompaniment.' },
   { id: 'country', name: 'Country', blurb: 'Boom-chick bass, pentatonic tunes, slip notes.' },
-  { id: 'film', name: 'Film, Neo-classical & Ambient', blurb: 'Slow arpeggios, ostinatos, space.' },
+  { id: 'film', pedal: true, name: 'Film, Neo-classical & Ambient', blurb: 'Slow arpeggios, ostinatos, space.' },
 ];
 
 // ---------------------------------------------------------------- technique (warm-up track)
