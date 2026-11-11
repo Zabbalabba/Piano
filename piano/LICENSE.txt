@@ -1,0 +1,7 @@
+Piano samples: Salamander Grand Piano V3 by Alexander Holm
+https://archive.org/details/SalamanderGrandPianoV3
+Licensed under Creative Commons Attribution 3.0 (CC BY 3.0)
+http://creativecommons.org/licenses/by/3.0/
+
+MP3 conversion from the npm package @audio-samples/piano-mp3-velocity8 (Jan Forst, MIT).
+For this app the files were converted to mono, trimmed to nine seconds and faded out.

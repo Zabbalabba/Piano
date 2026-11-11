@@ -6,7 +6,7 @@ import {
   newState, buildSession, structureFor, lengthBounds, applyRating, completeSession, applyLevel,
   startTempo, nextPiece, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
 } from './planner.js';
-import { unlock, playEvents, playNote, chime, audio, silence } from './audio.js';
+import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from './audio.js';
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
 import { createPlayer } from './player.js';
 import { renderSheet, renderNote } from './sheet.js';
@@ -887,6 +887,7 @@ function settings() {
       <label class="btn">Import backup<input type="file" id="imp" accept="application/json,.json" hidden></label>
       <button class="btn danger" data-act="reset">Erase everything</button>
     </div>
+    <p class="note credits">Piano sound: Salamander Grand Piano by Alexander Holm, CC BY 3.0. Notation drawn with VexFlow.</p>
   </main>${nav('settings')}`, {
     go,
     sample: playSample,
@@ -950,6 +951,9 @@ applyTheme();
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-const boot = () => home();
+const boot = () => {
+  home();
+  try { loadPiano(); } catch { /* sound loads on the first tap instead */ }
+};
 if (window.Vex) boot();
 else window.addEventListener('DOMContentLoaded', boot);

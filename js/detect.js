@@ -43,23 +43,44 @@ export function rms(buf) {
   return Math.sqrt(s / buf.length);
 }
 
+// Strongest energy close to a frequency. Real pianos are tuned progressively sharp towards the top
+// and their overtones run sharper still, so the search reaches further up the higher it looks.
+function peakNear(win, sampleRate, freq) {
+  const up = Math.min(40, 6 + freq / 60); // cents
+  const down = -8;
+  const stepHz = sampleRate / win.data.length / 2;
+  const steps = Math.max(1, Math.ceil((freq * (Math.pow(2, up / 1200) - Math.pow(2, down / 1200))) / stepHz));
+  let best = 0;
+  for (let i = 0; i <= steps; i++) {
+    const cents = down + ((up - down) * i) / steps;
+    best = Math.max(best, energyAt(win, sampleRate, freq * Math.pow(2, cents / 1200)));
+  }
+  return best;
+}
+
 // win: result of hann() on roughly 170 ms of audio.
 export function notePresent(win, sampleRate, midi) {
   const f0 = midiToFreq(midi);
   const n = win.data.length;
   // Only use harmonics high enough that a semitone is clearly separated at this window length.
   const minFreq = (2.2 * sampleRate) / n / (SEMI - 1);
-  let h = Math.max(1, Math.ceil(minFreq / f0));
+  const first = Math.max(1, Math.ceil(minFreq / f0));
   let found = 0;
   let checked = 0;
-  for (; checked < 3; h++) {
+  let fundamental = 0;
+  for (let h = first; checked < 3; h++) {
     const f = f0 * h;
     if (f > Math.min(5000, sampleRate / 2 - 200)) break;
     checked += 1;
-    const here = energyAt(win, sampleRate, f);
+    const here = peakNear(win, sampleRate, f);
     if (here < 0.004) continue;
-    const beside = Math.max(energyAt(win, sampleRate, f * SEMI), energyAt(win, sampleRate, f / SEMI));
-    if (here > beside * 5) found += 1;
+    const beside = Math.max(peakNear(win, sampleRate, f * SEMI), peakNear(win, sampleRate, f / SEMI));
+    if (here > beside * 5) {
+      found += 1;
+      if (h === 1) fundamental = here;
+    }
   }
+  // High notes on a real piano are almost a pure tone: a dominant fundamental is enough there.
+  if (fundamental > 0.12) return true;
   return checked > 0 && found >= Math.min(2, checked);
 }

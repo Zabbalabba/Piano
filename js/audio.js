@@ -1,4 +1,4 @@
-// Sound: a small synthesised piano, a metronome click and a chime. No samples to download.
+// Sound: a sampled grand piano (with a synthesised fallback while it loads), a metronome click and a chime.
 
 import { midiToFreq } from './music.js';
 
@@ -27,6 +27,7 @@ export function audio() {
 // Must be called from a tap. Also tells iOS to play even when the ring switch is on silent.
 export async function unlock(recording = false) {
   audio();
+  loadPiano();
   try {
     if (navigator.audioSession) navigator.audioSession.type = recording ? 'play-and-record' : 'playback';
   } catch { /* not supported */ }
@@ -44,9 +45,70 @@ export async function unlock(recording = false) {
 
 const live = new Set();
 
+// ---- sampled piano: one recording every three semitones, pitched to the notes in between.
+const SAMPLE_NOTES = [33, 36, 39, 42, 45, 48, 51, 54, 57, 60, 63, 66, 69, 72, 75, 78, 81, 84, 87, 90, 93, 96];
+const samples = new Map(); // midi -> { buffer, offset }
+let loading = null;
+
+// Where the sound actually starts, so notes are not late by the silence at the head of the file.
+function onsetOf(buffer) {
+  const data = buffer.getChannelData(0);
+  const n = Math.min(data.length, Math.floor(buffer.sampleRate * 0.3));
+  let peak = 0;
+  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(data[i]));
+  for (let i = 0; i < n; i++) if (Math.abs(data[i]) > peak * 0.05) return Math.max(0, i / buffer.sampleRate - 0.002);
+  return 0;
+}
+
+export function loadPiano() {
+  if (loading) return loading;
+  const c = audio();
+  loading = Promise.all(SAMPLE_NOTES.map(async (m) => {
+    try {
+      const res = await fetch(`piano/${m}.mp3`);
+      if (!res.ok) return;
+      const raw = await res.arrayBuffer();
+      const buffer = await new Promise((ok, fail) => {
+        const p = c.decodeAudioData(raw, ok, fail);
+        if (p && p.then) p.then(ok, fail);
+      });
+      samples.set(m, { buffer, offset: onsetOf(buffer) });
+    } catch { /* this note falls back to its neighbours or the synth */ }
+  })).then(() => samples.size);
+  return loading;
+}
+
+export const pianoReady = () => samples.size > 0;
+
+function playSampled(midi, t, seconds, velocity) {
+  let best = null;
+  for (const m of samples.keys()) if (best === null || Math.abs(m - midi) < Math.abs(best - midi)) best = m;
+  if (best === null || Math.abs(best - midi) > 4) return false;
+  const c = ctx;
+  const { buffer, offset } = samples.get(best);
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  src.playbackRate.value = Math.pow(2, (midi - best) / 12);
+  const gain = c.createGain();
+  const level = 0.25 + velocity * 1.05;
+  const hold = Math.max(0.12, seconds);
+  gain.gain.setValueAtTime(level, t);
+  gain.gain.setValueAtTime(level, t + hold);
+  // Key release: the damper stops the string quickly but not instantly.
+  gain.gain.setTargetAtTime(0, t + hold, 0.09);
+  src.connect(gain).connect(master);
+  src.start(t, offset);
+  src.stop(t + hold + 0.7);
+  const voice = { gain, osc: src, osc2: null };
+  live.add(voice);
+  src.onended = () => live.delete(voice);
+  return true;
+}
+
 export function playNote(midi, when, seconds, velocity = 0.7) {
   const c = audio();
   const t = Math.max(when, c.currentTime);
+  if (samples.size && playSampled(midi, t, seconds, velocity)) return;
   const f = midiToFreq(midi);
   const osc = c.createOscillator();
   osc.setPeriodicWave(wave);

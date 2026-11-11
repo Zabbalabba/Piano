@@ -51,3 +51,15 @@ test('a fifth or a third is not mistaken for the expected note', () => {
   assert.ok(!has([60], 64));
   assert.ok(!has([67], 60));
 });
+
+test('hears high notes the way a real piano sounds them: sharp, and nearly a pure tone', () => {
+  for (const [m, cents] of [[78, 3], [84, 9], [90, 15], [96, 21]]) {
+    const buf = new Float32Array(N);
+    const f = midiToFreq(m) * Math.pow(2, cents / 1200);
+    for (let i = 0; i < N; i++) buf[i] = 0.3 * Math.sin((2 * Math.PI * f * i) / SR) + 0.004 * Math.sin((2 * Math.PI * f * 2.01 * i) / SR);
+    const win = hann(buf);
+    assert.ok(notePresent(win, SR, m), `note ${m}`);
+    assert.ok(!notePresent(win, SR, m + 1), `note ${m} heard as ${m + 1}`);
+    assert.ok(!notePresent(win, SR, m - 1), `note ${m} heard as ${m - 1}`);
+  }
+});

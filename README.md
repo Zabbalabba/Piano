@@ -51,6 +51,7 @@ To host it, enable GitHub Pages for the repository (Settings → Pages → Deplo
 - `js/planner.js` – session building, mastery and review rules, statistics
 - `js/player.js`, `js/sheet.js` – the exercise player and its two views
 - `js/audio.js`, `js/input.js`, `js/detect.js` – sound, MIDI and microphone listening
+- `piano/` – grand piano samples, one every three semitones
 - `js/quiz.js` – note reading and ear training questions
 - `js/app.js` – screens
 - `vendor/vexflow.js` – VexFlow 4.2.5 (MIT) for music notation
@@ -59,3 +60,8 @@ To host it, enable GitHub Pages for the repository (Settings → Pages → Deplo
 
 Public-domain and traditional pieces are marked as such in the app. Everything else was written for
 this app.
+
+## Piano sound
+
+The samples in `piano/` are from the Salamander Grand Piano V3 by Alexander Holm, licensed under
+[CC BY 3.0](http://creativecommons.org/licenses/by/3.0/). They were converted to mono, trimmed and faded for this app.
