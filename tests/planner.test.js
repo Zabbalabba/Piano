@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   newState, buildSession, structureFor, allocate, applyRating, completeSession, applyLevel,
-  lengthBounds, stats, weekStart, DAY, nextPiece,
+  lengthBounds, stats, weekStart, DAY, nextPiece, startTempo, FAST_FACTOR,
 } from '../js/planner.js';
 import { TRACK_ITEMS, ITEM_BY_ID } from '../js/content.js';
 
@@ -153,4 +153,29 @@ test('weekly stats', () => {
   assert.equal(st.weeksOnTarget, 1);
   assert.equal(st.totalMinutes, 27);
   assert.equal(new Date(weekStart(now)).getDay(), 1);
+});
+
+test('solid and clearly faster than planned masters at once, with a later review', () => {
+  const s = mk(10, 5);
+  const item = ITEM_BY_ID['tq-five-r'];
+  const r = applyRating(s, item.id, 'solid', Math.ceil(item.bpm * FAST_FACTOR), 0);
+  assert.equal(r.becameMastered, true);
+  assert.equal(r.fast, true);
+  assert.equal(s.items[item.id].due, 7 * DAY);
+});
+
+test('fast but not solid does not master', () => {
+  const s = mk(10, 5);
+  const item = ITEM_BY_ID['tq-five-r'];
+  assert.equal(applyRating(s, item.id, 'ok', item.bpm * 1.3, 0).becameMastered, false);
+});
+
+test('a run of solid ratings at full tempo starts new exercises at full tempo', () => {
+  const s = mk(10, 5);
+  const fresh = ITEM_BY_ID['fd-lh'];
+  assert.equal(startTempo(s, fresh), Math.round(fresh.bpm * 0.7));
+  for (const id of ['tq-five-r', 'tq-five-l', 'fd-rh']) applyRating(s, id, 'solid', ITEM_BY_ID[id].bpm, 0);
+  assert.equal(startTempo(s, fresh), fresh.bpm);
+  applyRating(s, 'tq-five-ht', 'hard', 60, 0);
+  assert.equal(startTempo(s, fresh), Math.round(fresh.bpm * 0.7));
 });

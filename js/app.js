@@ -4,7 +4,7 @@ import { GENRES, TRACK_ITEMS, PIECE_ITEMS, TRACK_INFO, ITEM_BY_ID, ASSESS_PASSAG
 import { parseExercise, noteToMidi } from './music.js';
 import {
   newState, buildSession, structureFor, lengthBounds, applyRating, completeSession, applyLevel,
-  startTempo, nextPiece, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
+  startTempo, nextPiece, FAST_FACTOR, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
 } from './planner.js';
 import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from './audio.js';
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
@@ -646,7 +646,7 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
   let rang = false;
   let rating = false;
   const lowT = Math.max(30, Math.round(item.bpm * 0.4));
-  const highT = Math.round(item.bpm * 1.3);
+  const highT = Math.round(item.bpm * 1.5);
   const total = minutes ? minutes * 60 : 0;
 
   show(`<main class="exercise">
@@ -758,6 +758,7 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
       rating = true;
       const hint = $('rateHint');
       if (best !== null) hint.textContent = `Best pass: ${best}%. ${best >= 85 ? 'That points to Solid.' : best >= 60 ? 'That points to Getting there.' : 'That points to Hard.'}`;
+      else if (tempo >= item.bpm * FAST_FACTOR) hint.textContent = `You played at ${tempo} bpm, well above the target of ${item.bpm}. Solid at this speed masters it straight away.`;
       else hint.textContent = tempo < item.bpm * 0.9 ? `You played at ${tempo} bpm. The target is ${item.bpm}.` : '';
       $('rate').hidden = false;
     },
@@ -765,7 +766,8 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
     rate: (el) => {
       const info = applyRating(S, item.id, el.dataset.v, tempo);
       save();
-      if (info.becameMastered) toast('Mastered. It comes back for a quick review in a few days.');
+      if (info.fast) toast('Well above tempo: mastered in one go. It comes back for review in a week.');
+      else if (info.becameMastered) toast('Mastered. It comes back for a quick review in a few days.');
       else if (el.dataset.v === 'solid' && !info.atTempo) toast(`Next time a little faster: ${info.nextTempo} bpm.`);
       else if (el.dataset.v === 'hard') toast(`Next time a little slower: ${info.nextTempo} bpm.`);
       onDone({ rating: el.dataset.v, seconds: (Date.now() - started) / 1000, info });

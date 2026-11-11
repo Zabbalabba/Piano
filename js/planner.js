@@ -194,10 +194,16 @@ export function allocate(slots, minutes) {
   return list;
 }
 
+// Playing this much faster than the target tempo, and solidly, masters an exercise in one go.
+export const FAST_FACTOR = 1.15;
+const FAST_REVIEW_DAYS = 7;
+// After this many solid ratings in a row at full tempo, new exercises start at full tempo too.
+const PACE_RUN = 3;
+
 export function startTempo(state, item) {
   const p = state.items[item.id];
   if (p && p.bpm) return p.bpm;
-  return Math.round(item.bpm * 0.7);
+  return Math.round(item.bpm * ((state.pace || 0) >= PACE_RUN ? 1 : 0.7));
 }
 
 // rating: 'hard' | 'ok' | 'solid'
@@ -209,6 +215,7 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
   p.last = now;
   p.bpm = tempo;
   const atTempo = tempo >= item.bpm * 0.9;
+  const fast = rating === 'solid' && tempo >= item.bpm * FAST_FACTOR;
   let becameMastered = false;
 
   if (wasMastered) {
@@ -227,15 +234,19 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
     } else if (rating === 'solid') {
       if (atTempo) p.solid += 1;
       else p.bpm = Math.min(item.bpm, Math.round(tempo * 1.12));
-      if (p.solid >= 2) {
+      // Solid and clearly faster than planned: no need to prove it twice, and the review can wait longer.
+      if (p.solid >= 2 || fast) {
         p.st = 'mastered';
-        p.ivl = 3;
-        p.due = now + 3 * DAY;
+        p.ivl = fast ? FAST_REVIEW_DAYS : 3;
+        p.due = now + p.ivl * DAY;
         becameMastered = true;
       }
     }
   }
-  return { becameMastered, atTempo, nextTempo: p.bpm, target: item.bpm };
+  // A run of solid ratings at full tempo means the slow start is not needed for the next new exercise.
+  if (rating === 'solid' && tempo >= item.bpm) state.pace = (state.pace || 0) + 1;
+  else if (rating === 'hard' || (rating === 'solid' && !atTempo)) state.pace = 0;
+  return { becameMastered, fast: becameMastered && fast, atTempo, nextTempo: p.bpm, target: item.bpm };
 }
 
 // Record a finished (or partly finished) session and move the queue on.
@@ -328,6 +339,7 @@ export function newState(now = Date.now()) {
     },
     items: {},
     rot: 0,
+    pace: 0,
     sessions: 0,
     history: [],
     quiz: { ear: [], read: [] },

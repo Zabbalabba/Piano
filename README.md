@@ -32,6 +32,9 @@ and installs to a phone's home screen.
   special handling.
 - An exercise is mastered after two "Solid" ratings at (or near) its target tempo. It then returns
   for review after 3 days, with the gap growing each time.
+- Solid at 15% or more above the target tempo masters an exercise in one go, with the first review
+  after a week. After three solid ratings in a row at full tempo, new exercises start at full tempo
+  instead of 70%.
 
 ## Run it
 
