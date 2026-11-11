@@ -1,5 +1,5 @@
 // Offline support: try the network first so updates arrive, fall back to the cache.
-const CACHE = 'piano-v1';
+const CACHE = 'piano-v2';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'vendor/vexflow.js',
   'js/app.js', 'js/audio.js', 'js/content.js', 'js/detect.js', 'js/input.js', 'js/music.js',

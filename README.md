@@ -13,6 +13,7 @@ and installs to a phone's home screen.
   keyboard (exact; needs Chrome or Edge on a laptop or Android device).
 - **Skill check** at setup, **ear training** and **note reading** as optional extras or on their own.
 - **Progress** centred on a weekly goal rather than a daily streak.
+- **Evening mode**: a dim, warm theme with dark sheet music, switchable by hand or automatically at night.
 
 ## How sessions are planned
 

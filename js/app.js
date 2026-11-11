@@ -41,6 +41,30 @@ const save = () => {
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { toast('Could not save on this device.'); }
 };
 
+// ---------------------------------------------------------------- appearance
+
+const THEMES = { system: 'Follow phone', light: 'Light', dark: 'Dark', evening: 'Evening' };
+const EVENING_FROM = 19;
+const EVENING_UNTIL = 6;
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+
+function currentTheme(now = new Date()) {
+  const { theme, autoEvening } = S.settings;
+  const h = now.getHours();
+  if (theme === 'evening' || (autoEvening && (h >= EVENING_FROM || h < EVENING_UNTIL))) return 'evening';
+  if (theme === 'light' || theme === 'dark') return theme;
+  return systemDark.matches ? 'dark' : 'light';
+}
+function applyTheme() {
+  const t = currentTheme();
+  if (document.documentElement.dataset.theme === t) return;
+  document.documentElement.dataset.theme = t;
+  const bar = document.querySelector('meta[name="theme-color"]');
+  if (bar) bar.content = { light: '#f6f3ec', dark: '#14161c', evening: '#100d0a' }[t];
+}
+systemDark.addEventListener('change', applyTheme);
+setInterval(applyTheme, 60000);
+
 // ---------------------------------------------------------------- small helpers
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -835,6 +859,11 @@ function settings() {
   const sw = (key, label, sub) => `<button class="row switch ${s.modules[key] ? 'on' : ''}" data-act="module" data-v="${key}"><span><b>${label}</b><small>${sub}</small></span><i></i></button>`;
   show(`<main class="page">
     <h1>Settings</h1>
+    <h2>Appearance</h2>${chips('theme', Object.keys(THEMES), s.theme, (v) => THEMES[v])}
+    <section class="card rows gap">
+      <button class="row switch ${s.autoEvening ? 'on' : ''}" data-act="autoEvening"><span><b>Evening mode at night</b><small>Switches on by itself from 7 pm to 6 am</small></span><i></i></button>
+    </section>
+    <p class="note">Evening mode is dim and warm, with dark sheet music and muted keys.</p>
     <h2>Minutes per session</h2>${chips('min', MINUTE_CHOICES, s.minutes)}
     <h2>Sessions per week</h2>${chips('week', [1, 2, 3, 4, 5, 6, 7], s.perWeek)}
     ${routineNote(s.minutes, s.perWeek)}
@@ -861,6 +890,8 @@ function settings() {
   </main>${nav('settings')}`, {
     go,
     sample: playSample,
+    theme: keep((el) => { s.theme = el.dataset.v; applyTheme(); }),
+    autoEvening: keep(() => { s.autoEvening = !s.autoEvening; applyTheme(); }),
     min: keep((el) => { s.minutes = Number(el.dataset.v); }),
     week: keep((el) => { s.perWeek = Number(el.dataset.v); }),
     module: keep((el) => { s.modules[el.dataset.v] = !s.modules[el.dataset.v]; }),
@@ -888,6 +919,7 @@ function settings() {
       if (!confirm('Erase all progress and settings on this device?')) return;
       localStorage.removeItem(KEY);
       S = load();
+      applyTheme();
       home();
     },
   });
@@ -899,6 +931,7 @@ function settings() {
       if (data.v !== 1 || !data.profile || !data.settings) throw new Error('wrong file');
       localStorage.setItem(KEY, JSON.stringify(data));
       S = load();
+      applyTheme();
       toast('Backup restored.');
       settings();
     } catch {
@@ -911,7 +944,9 @@ function settings() {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) silence();
+  else applyTheme();
 });
+applyTheme();
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

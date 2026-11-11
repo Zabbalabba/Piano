@@ -323,7 +323,7 @@ export function newState(now = Date.now()) {
     v: 1,
     profile: { created: now, genres: [], level: { play: 1, read: 1, ear: 1 }, ready: false },
     settings: {
-      minutes: 10, perWeek: 5, input: 'none', view: 'keys',
+      minutes: 10, perWeek: 5, input: 'none', view: 'keys', theme: 'system', autoEvening: false,
       modules: { ear: true, reading: true, pieces: true }, metronome: true, guide: true,
     },
     items: {},

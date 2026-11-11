@@ -232,15 +232,15 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
       const h = black ? kbH * 0.62 : kbH;
       const hand = sounding.get(m);
       const tapped = pressed.has(m) && now - pressed.get(m) < 180;
-      g.fillStyle = hand ? (hand === 'R' ? colR : colL) : tapped ? css('--good') : black ? '#1c1d22' : '#f6f3ec';
+      g.fillStyle = hand ? (hand === 'R' ? colR : colL) : tapped ? css('--good') : black ? css('--key-black') : css('--key-white');
       g.beginPath();
       g.roundRect(x + 0.5, lineY, w - 1, h, [0, 0, 4, 4]);
       g.fill();
       if (!black) {
-        g.strokeStyle = '#b9b4a8';
+        g.strokeStyle = css('--key-edge');
         g.stroke();
         if (m % 12 === 0) {
-          g.fillStyle = hand ? '#fff' : '#77736a';
+          g.fillStyle = css('--key-label');
           g.font = '600 10px system-ui, sans-serif';
           g.textAlign = 'center';
           g.fillText(midiToName(m), x + w / 2, lineY + h - 7);
