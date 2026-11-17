@@ -8,7 +8,7 @@ import { onNote, hears, inputMode } from './input.js';
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true, metronome = true, onPass, onState }) {
+export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true, metronome = true, fingers = true, once = false, onPass, onState, onEnd }) {
   const p = parseExercise(item);
   const countIn = p.barBeats;
   const cycle = countIn + p.totalBeats;
@@ -53,9 +53,10 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     if (view === 'sheet') {
       stage.appendChild(sheetWrap);
       try {
-        sheet = renderSheet(paper, item, hands);
+        sheet = renderSheet(paper, item, hands, fingers);
         paper.style.width = sheet.width + 'px';
-        sheetWrap.classList.toggle('single', sheet.height < 200);
+        fitSheet();
+        sheetWrap.classList.toggle('single', sheet.height < 230);
       } catch (err) {
         paper.textContent = 'Could not draw the sheet music for this exercise.';
         console.error(err);
@@ -68,6 +69,14 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     draw();
   }
 
+  // Shrink the sheet to the height available, so nothing (finger numbers included) is cut off.
+  function fitSheet() {
+    if (!sheet) return;
+    const room = stage.clientHeight - 8;
+    sheet.scale = room > 0 ? Math.min(1, room / sheet.height) : 1;
+    paper.style.zoom = sheet.scale;
+  }
+
   function resize() {
     const r = stage.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -76,7 +85,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     canvas.style.width = r.width + 'px';
     canvas.style.height = r.height + 'px';
   }
-  const ro = new ResizeObserver(() => { if (view === 'keys') { resize(); draw(); } });
+  const ro = new ResizeObserver(() => { if (view === 'keys') resize(); else fitSheet(); draw(); });
   ro.observe(stage);
 
   // ---- audio scheduling
@@ -86,6 +95,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     const c0 = Math.floor(Math.max(0, scheduled) / cycle);
     const c1 = Math.floor(horizon / cycle);
     for (let c = c0; c <= c1; c++) {
+      if (once && c > 0) break;
       const base = c * cycle;
       for (let b = 0; b < cycle - 1e-6; b += p.pulse) {
         const abs = base + b;
@@ -219,6 +229,13 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
           g.beginPath();
           g.roundRect(x + 1.5, top, w - 3, bottom - top, 4);
           g.fill();
+          if (fingers && e.f && bottom - top >= 15 && w >= 11) {
+            g.fillStyle = css('--on-note');
+            g.font = `700 ${Math.min(14, Math.round(w * 0.62))}px system-ui, sans-serif`;
+            g.textAlign = 'center';
+            g.textBaseline = 'alphabetic';
+            g.fillText(String(e.f), x + w / 2, bottom - 4);
+          }
         }
         g.globalAlpha = 1;
         if (c === 0 && playing && pos >= e.t && pos < e.t + e.d) sounding.set(e.midi, e.hand);
@@ -265,9 +282,9 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
 
   function drawSheet(pos) {
     if (!sheet) return;
-    const x = cursorX(sheet.anchors, Math.max(0, pos));
+    const x = cursorX(sheet.anchors, Math.max(0, pos)) * (sheet.scale || 1);
     const lead = scroller.clientWidth * 0.3;
-    const scroll = Math.max(0, Math.min(sheet.width - scroller.clientWidth, x - lead));
+    const scroll = Math.max(0, Math.min(sheet.width * (sheet.scale || 1) - scroller.clientWidth, x - lead));
     if (playing) scroller.scrollLeft = scroll;
     cursor.style.transform = `translateX(${x - scroller.scrollLeft}px)`;
     cursor.style.opacity = playing ? 1 : 0.35;
@@ -285,6 +302,11 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
 
   function frame() {
     if (!playing) return;
+    if (once && beatNow() >= cycle) {
+      stop();
+      if (onEnd) onEnd();
+      return;
+    }
     const pos = (beatNow() % cycle) - countIn;
     track(pos);
     draw();
@@ -336,6 +358,8 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     setView: (v) => { view = v; mount(); },
     setGuide: (v) => restart(() => { guide = v; }),
     setMetronome: (v) => restart(() => { metronome = v; }),
+    setFingers: (v) => { fingers = v; mount(); },
+    setOnce: (v) => restart(() => { once = v; }),
     scoring,
     hasBothHands: () => !!p.rh && !!p.lh,
     destroy: () => { stop(); destroyed = true; ro.disconnect(); stage.innerHTML = ''; },

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   newState, buildSession, structureFor, allocate, applyRating, completeSession, applyLevel,
   lengthBounds, stats, weekStart, DAY, nextPiece, startTempo, FAST_FACTOR,
+  knowsExercise, suggestLevelUp,
 } from '../js/planner.js';
 import { TRACK_ITEMS, ITEM_BY_ID } from '../js/content.js';
 
@@ -147,11 +148,14 @@ test('weekly stats', () => {
   const s = mk(10, 2);
   const now = new Date(2026, 10, 11, 12).getTime(); // a Wednesday
   s.history.push({ d: now - DAY, min: 10, n: 2 }, { d: now, min: 12, n: 2 }, { d: now - 8 * DAY, min: 5, n: 1 });
+  s.history.push({ d: now + 60000, min: 3, n: 1 }); // a second session the same day
+  s.history.push({ d: now - 2 * DAY, min: 4, n: 0, extras: ['ear'], core: false }); // quiz only
   const st = stats(s, now);
-  assert.equal(st.weekSessions, 2);
-  assert.equal(st.weekMinutes, 22);
+  assert.equal(st.weekSessions, 3);
+  assert.equal(st.weekDays, 2);
+  assert.equal(st.weekMinutes, 29);
   assert.equal(st.weeksOnTarget, 1);
-  assert.equal(st.totalMinutes, 27);
+  assert.equal(st.totalMinutes, 34);
   assert.equal(new Date(weekStart(now)).getDay(), 1);
 });
 
@@ -178,4 +182,36 @@ test('a run of solid ratings at full tempo starts new exercises at full tempo', 
   assert.equal(startTempo(s, fresh), fresh.bpm);
   applyRating(s, 'tq-five-ht', 'hard', 60, 0);
   assert.equal(startTempo(s, fresh), Math.round(fresh.bpm * 0.7));
+});
+
+test('the skill check speed raises starting tempos, without an upper limit on progress', () => {
+  const s = mk(10, 5);
+  const fresh = ITEM_BY_ID['fd-lh'];
+  s.speed = 1.6;
+  assert.equal(startTempo(s, fresh), Math.round(fresh.bpm * 1.36));
+  const r = applyRating(s, 'fd-lh', 'solid', fresh.bpm * 2.5, 0);
+  assert.equal(r.fast, true);
+  assert.equal(s.items['fd-lh'].bpm, fresh.bpm * 2.5);
+});
+
+test('a demo is shown until the exercise has been played near its target tempo', () => {
+  const s = mk(10, 5);
+  const item = ITEM_BY_ID['tq-five-r'];
+  assert.equal(knowsExercise(s, item), false);
+  applyRating(s, item.id, 'ok', Math.round(item.bpm * 0.7), 0);
+  assert.equal(knowsExercise(s, item), false);
+  applyRating(s, item.id, 'hard', item.bpm, 0);
+  assert.equal(knowsExercise(s, item), false);
+  applyRating(s, item.id, 'ok', item.bpm, 0);
+  assert.equal(knowsExercise(s, item), true);
+});
+
+test('three fast masteries in a row suggest moving up a level', () => {
+  const s = mk(10, 5);
+  for (const id of ['tq-five-r', 'tq-five-l']) applyRating(s, id, 'solid', ITEM_BY_ID[id].bpm * 1.3, 0);
+  assert.equal(suggestLevelUp(s), false);
+  applyRating(s, 'fd-rh', 'solid', ITEM_BY_ID['fd-rh'].bpm * 1.3, 0);
+  assert.equal(suggestLevelUp(s), true);
+  applyRating(s, 'fd-lh', 'hard', 50, 0);
+  assert.equal(suggestLevelUp(s), false);
 });

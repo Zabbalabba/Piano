@@ -28,6 +28,13 @@ export const GENRES = [
 // ---------------------------------------------------------------- technique (warm-up track)
 
 const upDown = (notes) => [...notes, ...[...notes].reverse()];
+const fingered = (notes, fingers) => notes.map((n, i) => `${n}@${fingers[i]}`);
+// Standard scale fingerings, going up. Going down uses the same fingers in reverse.
+const SCALE_FINGERS = {
+  R: { default: [1, 2, 3, 1, 2, 3, 4, 5], F: [1, 2, 3, 4, 1, 2, 3, 4] },
+  L: { default: [5, 4, 3, 2, 1, 3, 2, 1] },
+};
+const scaleFingers = (root, hand) => SCALE_FINGERS[hand][root] || SCALE_FINGERS[hand].default;
 const inBars = (notes, per = 4, dur = 'q') => {
   const out = [];
   for (let i = 0; i < notes.length; i += per) {
@@ -35,14 +42,16 @@ const inBars = (notes, per = 4, dur = 'q') => {
   }
   return out.join(' | ');
 };
-const scaleLine = (root, mode) => inBars(upDown(scaleNotes(root, mode)));
+const scaleUpDown = (root, mode, hand) =>
+  upDown(fingered(scaleNotes(root, mode), scaleFingers(root.replace(/\d/, ''), hand)));
+const scaleLine = (root, mode, hand = 'R') => inBars(scaleUpDown(root, mode, hand));
 const SCALE_TIP_R = 'Right hand fingering up: 1-2-3, thumb under, 1-2-3-4-5. Same fingers back down.';
 const SCALE_TIP_L = 'Left hand fingering up: 5-4-3-2-1, third finger over, 3-2-1. Same fingers back down.';
 const SCALE_TIP_HT = 'Slow enough that both hands land exactly together. ' + SCALE_TIP_R + ' ' + SCALE_TIP_L;
 
 function scaleItem(id, name, root, mode, lv, bpm, hands, tip) {
-  const r = scaleLine(root + '4', mode);
-  const l = scaleLine(root + '3', mode);
+  const r = scaleLine(root + '4', mode, 'R');
+  const l = scaleLine(root + '3', mode, 'L');
   return {
     id, lv, bpm,
     t: `${name} scale, ${hands === 'R' ? 'right hand' : hands === 'L' ? 'left hand' : 'hands together'}`,
@@ -86,7 +95,7 @@ const TECHNIQUE = [
   {
     id: 'tq-c-contrary', lv: 1, bpm: 72, t: 'C major scale, contrary motion',
     rh: scaleLine('C4', 'major'),
-    lh: 'C4/q B3 A3 G3 | F3 E3 D3 C3 | C3 D3 E3 F3 | G3 A3 B3 C4',
+    lh: 'C4@1/q B3@2 A3@3 G3@1 | F3@2 E3@3 D3@4 C3@5 | C3@5 D3@4 E3@3 F3@2 | G3@1 A3@3 B3@2 C4@1',
     focus: 'Both hands use the same fingers at the same time, the easiest way into hands-together scales.',
     tip: 'Both thumbs start on middle C and the hands mirror each other: 1-2-3, 1-2-3-4-5 outwards.',
   },
@@ -107,24 +116,24 @@ const TECHNIQUE = [
   scaleItem('tq-g-ht', 'G major', 'G', 'major', 2, 76, 'HT', 'One black key: F sharp. Same fingering as C major in both hands.'),
   {
     id: 'tq-arp-c', lv: 2, bpm: 76, t: 'C arpeggio, hands in turn',
-    rh: 'C4/q E4 G4 C5 | E5 C5 G4 E4 | C4/w | r/w | r/w | r/w',
-    lh: 'r/w | r/w | r/w | C3/q E3 G3 C4 | E4 C4 G3 E3 | C3/w',
+    rh: 'C4@1/q E4@2 G4@3 C5@1 | E5@2 C5@1 G4@3 E4@2 | C4@1/w | r/w | r/w | r/w',
+    lh: 'r/w | r/w | r/w | C3@5/q E3@4 G3@2 C4@1 | E4@3 C4@1 G3@2 E3@4 | C3@5/w',
     focus: 'Arpeggios stretch the hand and train the thumb to pass under smoothly.',
-    tip: 'Right hand 1-2-3-1-2. Left hand 5-4-2-1-2. Let the arm carry the hand sideways, do not twist the wrist.',
+    tip: 'Right hand 1-2-3, thumb under to C, then 2. Left hand 5-4-2-1, then 3 crosses over the thumb. Let the arm carry the hand sideways, do not twist the wrist.',
   },
   scaleItem('tq-f-r', 'F major', 'F', 'major', 2, 80, 'R', 'One black key: B flat. Right hand fingering is different: 1-2-3-4, thumb under, 1-2-3-4.'),
   scaleItem('tq-am-ht', 'A harmonic minor', 'A', 'harmonic', 2, 72, 'HT', 'One black key: G sharp. Same fingering as C major. Listen for the wide step between F and G sharp.'),
   scaleItem('tq-d-ht', 'D major', 'D', 'major', 3, 80, 'HT', 'Two black keys: F sharp and C sharp. Same fingering as C major.'),
   {
     id: 'tq-c-eighths', lv: 3, bpm: 72, t: 'C major scale in eighth notes',
-    rh: inBars(upDown(scaleNotes('C4', 'major')), 8, 'e'),
-    lh: inBars(upDown(scaleNotes('C3', 'major')), 8, 'e'),
+    rh: inBars(scaleUpDown('C4', 'major', 'R'), 8, 'e'),
+    lh: inBars(scaleUpDown('C3', 'major', 'L'), 8, 'e'),
     focus: 'Same scale, twice the speed per beat. Evenness matters more than tempo.',
     tip: 'Every note the same length and loudness. If the thumb note sticks out, slow down.',
   },
   {
     id: 'tq-chromatic', lv: 3, bpm: 72, t: 'Chromatic scale, right hand',
-    rh: 'C4/e C#4 D4 D#4 E4 F4 F#4 G4 | G#4 A4 A#4 B4 C5 B4 A#4 A4 | G#4 G4 F#4 F4 E4 D#4 D4 C#4 | C4/w',
+    rh: 'C4@1/e C#4@3 D4@1 D#4@3 E4@1 F4@2 F#4@3 G4@1 | G#4@3 A4@1 A#4@3 B4@1 C5@2 B4@1 A#4@3 A4@1 | G#4@3 G4@1 F#4@3 F4@2 E4@1 D#4@3 D4@1 C#4@3 | C4@1/w',
     focus: 'Every key in order. Trains compact, precise finger movement.',
     tip: 'Third finger on every black key, thumb on white keys, second finger on F and C.',
   },
@@ -224,9 +233,10 @@ const stab = (c) => `r/q ${c}/q r/q ${c}/q`;
 const FUNK_OCT = 'D2/e D3 r D3 r/q C3/e D3';
 const FUNK_A = 'D4/e D4 r F4 G4 r A4 G4';
 const FUNK_B = 'D4/e D4 r F4 G4/q F4/e D4';
+// Slip notes: the top note stays on 5 while 3 slides up a step underneath.
 const SLIP_G = bars(
-  'A4+D5/e B4+D5/q. A4+D5/e B4+D5/q.', 'D5+G5/e E5+G5/q. D5+G5/e E5+G5/q.',
-  'E4+A4/e F#4+A4/q. E4+A4/e F#4+A4/q.', 'A4+D5/e B4+D5/q. B4+D5/h',
+  'A4@3+D5@5/e B4@3+D5@5/q. A4@3+D5@5/e B4@3+D5@5/q.', 'D5@3+G5@5/e E5@3+G5@5/q. D5@3+G5@5/e E5@3+G5@5/q.',
+  'E4@3+A4@5/e F#4@3+A4@5/q. E4@3+A4@5/e F#4@3+A4@5/q.', 'A4@3+D5@5/e B4@3+D5@5/q. B4@3+D5@5/h',
 );
 const ODE_A1 = 'E4/q E4 F4 G4 | G4 F4 E4 D4 | C4 C4 D4 E4 | E4/q. D4/e D4/h';
 const ODE_A2 = 'E4/q E4 F4 G4 | G4 F4 E4 D4 | C4 C4 D4 E4 | D4/q. C4/e C4/h';
@@ -328,9 +338,9 @@ const TRACKS = {
     },
     {
       id: 'bl-scale', lv: 2, bpm: 88, swing: true, t: 'Blues scale, right hand',
-      rh: 'C4/q Eb4 F4 F#4 | G4 Bb4 C5/h | C5/q Bb4 G4 F#4 | F4 Eb4 C4/h',
+      rh: 'C4@1/q Eb4@2 F4@3 F#4@4 | G4@1 Bb4@2 C5@3/h | C5@3/q Bb4@2 G4@1 F#4@4 | F4@3 Eb4@2 C4@1/h',
       focus: 'Six notes that sound like the blues over all three chords.',
-      tip: 'Fingering up: 1-2-3-4, then 1-3-4 (thumb under to G). Lean on the F sharp, the "blue note".',
+      tip: 'Fingering up: 1-2-3-4, thumb under to G, then 2-3. The same fingers come back down. Lean on the F sharp, the "blue note".',
     },
     {
       id: 'bl-call', lv: 2, bpm: 88, swing: true, t: 'Call and response',
@@ -355,9 +365,9 @@ const TRACKS = {
     },
     {
       id: 'rg-chromatic', lv: 2, bpm: 84, t: 'Chromatic approach notes',
-      rh: 'D4/e D#4 E4/q C5 E4 | D4/e D#4 E4/q C5/h | A4/e A#4 B4/q D5 B4 | C5/w',
+      rh: 'D4@2/e D#4@3 E4@1/q C5@5 E4@1 | D4@2/e D#4@3 E4@1/q C5@5/h | A4@2/e A#4@3 B4@1/q D5@3 B4@1 | C5@2/w',
       focus: 'Sliding into a chord note from a half step below, a signature ragtime ornament.',
-      tip: 'Fingers 1-2-3 on the three-note slide, then reach up with the little finger.',
+      tip: 'The slide is fingered like a chromatic scale: 2 and 3, then the thumb lands on the chord note.',
     },
     {
       id: 'rg-synco', lv: 2, bpm: 80, t: 'Syncopation: short–long–short',
@@ -620,7 +630,7 @@ const TRACKS = {
       rh: bars(rep('E4/e G4 C5 G4', 2), rep('E4/e A4 C5 A4', 2), rep('F4/e A4 C5 A4', 2), rep('D4/e G4 B4 G4', 2)),
       lh: 'C3/h C3 | A2/h A2 | F2/h F2 | G2/h G2',
       focus: 'A rolling right hand pattern that imitates a fingerpicked guitar.',
-      tip: 'Fingers 1-2-5-2. Keep it flowing and quiet, like an accompaniment under a voice.',
+      tip: 'Thumb on the lowest note, little finger on the top. Keep it flowing and quiet, like an accompaniment under a voice.',
     },
     {
       id: 'fk-sus', lv: 2, bpm: 76, t: 'Suspended chords',
@@ -1045,3 +1055,5 @@ export const ITEM_BY_ID = Object.fromEntries(ALL_ITEMS.map((x) => [x.id, x]));
 
 // Passages used by the skill check when setting up a profile.
 export const ASSESS_PASSAGES = ['tq-five-r', 'fd-melody-chords', 'cl-melody-alberti'];
+// Exercises for the speed part of the skill check, one per level, shown as falling keys.
+export const ASSESS_SPEED = ['tq-five-ht', 'fd-eighths', 'tq-c-eighths'];

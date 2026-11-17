@@ -4,6 +4,7 @@
 //   C4/q        single note, quarter        (w h q e s, add "." for dotted)
 //   C4+E4+G4/h  chord
 //   r/q         rest
+//   C4@1        a note with a fixed finger (1 thumb .. 5 little finger); others are worked out
 // A token without "/dur" reuses the previous duration in that voice.
 
 const LETTER_SEMIS = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -12,7 +13,7 @@ const SHARP_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#',
 export const DUR_BEATS = { w: 4, h: 2, q: 1, e: 0.5, s: 0.25 };
 
 export function noteToMidi(name) {
-  const m = /^([A-G])(#{1,2}|b{1,2})?(-?\d)$/.exec(name);
+  const m = /^([A-G])(#{1,2}|b{1,2})?(-?\d)(?:@[1-5])?$/.exec(name);
   if (!m) throw new Error(`Bad note "${name}"`);
   const acc = m[2] ? (m[2][0] === '#' ? m[2].length : -m[2].length) : 0;
   return 12 * (Number(m[3]) + 1) + LETTER_SEMIS[m[1]] + acc;
@@ -72,11 +73,11 @@ export function pat(root, tpl) {
         .split('+')
         .map((x) => {
           if (x === 'r') return 'r';
-          const m = /^(b|#)?(\d+)$/.exec(x);
+          const m = /^(b|#)?(\d+)(@[1-5])?$/.exec(x);
           if (!m) throw new Error(`Bad degree "${x}"`);
           const n = Number(m[2]) - 1;
           const semis = MAJOR[n % 7] + 12 * Math.floor(n / 7) + (m[1] === 'b' ? -1 : m[1] === '#' ? 1 : 0);
-          return transposeNote(root, n, semis);
+          return transposeNote(root, n, semis) + (m[3] || '');
         })
         .join('+');
       return d ? `${pitches}/${d}` : pitches;
@@ -111,9 +112,11 @@ export function parseVoice(str, barBeats) {
       const dots = dur.endsWith('.') ? 1 : 0;
       const beats = DUR_BEATS[base] * (dots ? 1.5 : 1);
       const rest = p === 'r';
-      const notes = rest ? [] : p.split('+');
-      notes.forEach(noteToMidi);
-      return { notes, rest, dur: base, dots, beats };
+      const raw = rest ? [] : p.split('+');
+      raw.forEach(noteToMidi);
+      const notes = raw.map((n) => n.split('@')[0]);
+      const fixed = raw.map((n) => (n.includes('@') ? Number(n.split('@')[1]) : null));
+      return { notes, fixed, rest, dur: base, dots, beats };
     });
     const sum = toks.reduce((a, t) => a + t.beats, 0);
     if (Math.abs(sum - barBeats) > 1e-6) {
@@ -130,6 +133,8 @@ export function swingBeat(b) {
   return whole + (f < 0.5 ? f * (4 / 3) : 2 / 3 + (f - 0.5) * (2 / 3));
 }
 
+import { assignFingers } from './fingering.js';
+
 const cache = new Map();
 
 export function parseExercise(ex) {
@@ -143,6 +148,8 @@ export function parseExercise(ex) {
     throw new Error(`${ex.id}: right hand has ${rh.length} bars, left hand ${lh.length}`);
   }
   const nBars = (rh || lh).length;
+  if (rh) assignFingers(rh, 'R', barBeats);
+  if (lh) assignFingers(lh, 'L', barBeats);
   const events = [];
   const add = (voice, hand) => {
     if (!voice) return;
@@ -156,9 +163,9 @@ export function parseExercise(ex) {
             start = swingBeat(start);
             end = swingBeat(end);
           }
-          for (const n of tok.notes) {
-            events.push({ t: start, d: end - start, midi: noteToMidi(n), hand, nt: t });
-          }
+          tok.notes.forEach((n, k) => {
+            events.push({ t: start, d: end - start, midi: noteToMidi(n), hand, nt: t, f: tok.fingers[k] });
+          });
         }
         t += tok.beats;
       }

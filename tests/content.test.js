@@ -62,3 +62,31 @@ test('theory helpers', () => {
   assert.equal(pat('C3', '1+5/q 1+6'), 'C3+G3/q C3+A3');
   assert.equal(pat('G2', 'b7/q 6'), 'F3/q E3');
 });
+
+test('every note has a finger, and chords use different fingers in hand order', () => {
+  for (const item of ALL_ITEMS) {
+    const p = parseExercise(item);
+    for (const [voice, hand] of [[p.rh, 'R'], [p.lh, 'L']]) {
+      for (const bar of voice || []) {
+        for (const tok of bar) {
+          if (tok.rest) continue;
+          assert.equal(tok.fingers.length, tok.notes.length, item.id);
+          for (const f of tok.fingers) assert.ok(f >= 1 && f <= 5, `${item.id}: finger ${f}`);
+          const byPitch = tok.notes.map((n, i) => [noteToMidi(n), tok.fingers[i]]).sort((a, b) => a[0] - b[0]);
+          for (let i = 1; i < byPitch.length; i++) {
+            const ok = hand === 'R' ? byPitch[i][1] > byPitch[i - 1][1] : byPitch[i][1] < byPitch[i - 1][1];
+            assert.ok(ok, `${item.id}: chord ${tok.notes.join('+')} fingered ${tok.fingers.join('-')}`);
+          }
+        }
+      }
+    }
+  }
+});
+
+test('standard fingerings: C major scale and a C chord', () => {
+  const f = (id, v) => parseExercise(ITEM_BY_ID[id])[v].flat().filter((t) => !t.rest).map((t) => t.fingers.join('+')).join(' ');
+  assert.equal(f('tq-c-r', 'rh'), '1 2 3 1 2 3 4 5 5 4 3 2 1 3 2 1');
+  assert.equal(f('tq-c-l', 'lh'), '5 4 3 2 1 3 2 1 1 2 3 1 2 3 4 5');
+  assert.equal(f('fd-chords', 'lh').split(' ')[0], '5+3+1');
+  assert.equal(f('tq-inv-c', 'rh').split(' ').slice(0, 3).join(' '), '1+3+5 1+2+5 1+3+5');
+});

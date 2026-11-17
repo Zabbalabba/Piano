@@ -1,6 +1,6 @@
 // Sheet music view, drawn with VexFlow as one long line that scrolls under a fixed cursor.
 
-import { parseExercise, swingBeat } from './music.js';
+import { parseExercise, swingBeat, noteToMidi } from './music.js';
 
 const VF = () => window.Vex.Flow;
 const DUR = { w: 'w', h: 'h', q: 'q', e: '8', s: '16' };
@@ -9,20 +9,31 @@ const key = (name) => {
   return `${m[1].toLowerCase()}${m[2] || ''}/${m[3]}`;
 };
 
-function makeNotes(bar, clef) {
+function makeNotes(bar, clef, fingers) {
   const F = VF();
   return bar.map((tok) => {
     const duration = DUR[tok.dur] + (tok.dots ? 'd' : '') + (tok.rest ? 'r' : '');
     const keys = tok.rest ? [clef === 'treble' ? 'b/4' : 'd/3'] : tok.notes.map(key);
     const note = new F.StaveNote({ clef, keys, duration, auto_stem: true });
     if (tok.dots) F.Dot.buildAndAttach([note], { all: true });
+    if (fingers && !tok.rest && tok.fingers) {
+      // Right hand above the staff, left hand below; for chords the top note's finger is on top.
+      const top = clef === 'treble';
+      const order = tok.notes.map((n, i) => i).sort((a, b) => (top ? 1 : -1) * (noteToMidi(tok.notes[a]) - noteToMidi(tok.notes[b])));
+      for (const i of order) {
+        const a = new F.Annotation(String(tok.fingers[i]))
+          .setFont('Arial', 11, 'bold')
+          .setVerticalJustification(top ? F.Annotation.VerticalJustify.TOP : F.Annotation.VerticalJustify.BOTTOM);
+        note.addModifier(a, 0);
+      }
+    }
     return note;
   });
 }
 
 // Draws the exercise into `host` and returns { anchors, width, height }.
 // anchors map a playback beat to an x position, for the cursor.
-export function renderSheet(host, item, hands = 'B') {
+export function renderSheet(host, item, hands = 'B', fingers = false) {
   const F = VF();
   const p = parseExercise(item);
   host.innerHTML = '';
@@ -33,7 +44,7 @@ export function renderSheet(host, item, hands = 'B') {
   if (showL || (!showR && p.lh && !voices.length)) voices.push({ bars: p.lh, clef: 'bass' });
   const two = voices.length === 2;
   const keySig = item.key || 'C';
-  const height = two ? 250 : 150;
+  const height = (two ? 250 : 150) + (fingers ? 64 : 0);
 
   const widths = [];
   for (let b = 0; b < p.nBars; b++) {
@@ -53,7 +64,7 @@ export function renderSheet(host, item, hands = 'B') {
 
   for (let b = 0; b < p.nBars; b++) {
     const staves = voices.map((v, i) => {
-      const stave = new F.Stave(x, 16 + i * 100, widths[b]);
+      const stave = new F.Stave(x, (fingers ? 44 : 16) + i * (fingers ? 108 : 100), widths[b]);
       if (b === 0) stave.addClef(v.clef).addKeySignature(keySig).addTimeSignature(tsStr);
       if (b === p.nBars - 1) stave.setEndBarType(F.Barline.type.END);
       return stave;
@@ -70,7 +81,7 @@ export function renderSheet(host, item, hands = 'B') {
     }
 
     const built = voices.map((v) => {
-      const notes = makeNotes(v.bars[b], v.clef);
+      const notes = makeNotes(v.bars[b], v.clef, fingers);
       const voice = new F.Voice({ num_beats: p.ts[0], beat_value: p.ts[1] }).setStrict(false);
       voice.addTickables(notes);
       F.Accidental.applyAccidentals([voice], keySig);

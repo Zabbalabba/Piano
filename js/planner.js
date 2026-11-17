@@ -12,7 +12,7 @@ const ROLE = {
   review: { weight: 0.7, min: 1.5 },
 };
 
-// From this many planned sessions a week, focus exercises rotate between genres.
+// From this many practice days a week, focus exercises rotate between genres.
 // Below it, the same set repeats until it is mastered.
 export const ROTATE_FROM = 3;
 // From this target length a session has the full warm-up / skills / review structure.
@@ -200,11 +200,26 @@ const FAST_REVIEW_DAYS = 7;
 // After this many solid ratings in a row at full tempo, new exercises start at full tempo too.
 const PACE_RUN = 3;
 
+// After this many exercises in a row mastered well above tempo, the app suggests moving up a level.
+export const LEVEL_UP_RUN = 3;
+
+// Tempo a new exercise starts at: 70% of the target, or more once you have shown you are faster
+// (in the skill check, or with a run of solid ratings at full tempo). There is no upper limit.
 export function startTempo(state, item) {
   const p = state.items[item.id];
   if (p && p.bpm) return p.bpm;
-  return Math.round(item.bpm * ((state.pace || 0) >= PACE_RUN ? 1 : 0.7));
+  let factor = (state.pace || 0) >= PACE_RUN ? 1 : 0.7;
+  if (state.speed) factor = Math.max(factor, Math.min(1.5, state.speed * 0.85));
+  return Math.round(item.bpm * factor);
 }
+
+// Whether you have played this exercise at (nearly) its target tempo yet. If not, it opens with a demo.
+export function knowsExercise(state, item) {
+  const p = state.items[item.id];
+  return !!p && (p.st === 'mastered' || (p.top || 0) >= item.bpm * 0.9);
+}
+
+export const suggestLevelUp = (state) => (state.fastRun || 0) >= LEVEL_UP_RUN && state.profile.level.play < 3;
 
 // rating: 'hard' | 'ok' | 'solid'
 export function applyRating(state, id, rating, tempo, now = Date.now()) {
@@ -214,6 +229,7 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
   p.reps += 1;
   p.last = now;
   p.bpm = tempo;
+  if (rating !== 'hard') p.top = Math.max(p.top || 0, tempo);
   const atTempo = tempo >= item.bpm * 0.9;
   const fast = rating === 'solid' && tempo >= item.bpm * FAST_FACTOR;
   let becameMastered = false;
@@ -246,6 +262,8 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
   // A run of solid ratings at full tempo means the slow start is not needed for the next new exercise.
   if (rating === 'solid' && tempo >= item.bpm) state.pace = (state.pace || 0) + 1;
   else if (rating === 'hard' || (rating === 'solid' && !atTempo)) state.pace = 0;
+  if (becameMastered && fast) state.fastRun = (state.fastRun || 0) + 1;
+  else if (becameMastered || rating === 'hard') state.fastRun = 0;
   return { becameMastered, fast: becameMastered && fast, atTempo, nextTempo: p.bpm, target: item.bpm };
 }
 
@@ -289,6 +307,9 @@ export function weekStart(ts) {
   return d.getTime();
 }
 
+// A day counts as a practice day when you played: a session, a piece or free practice (not only quizzes).
+const atPiano = (h) => h.core !== false || (h.extras || []).some((x) => x === 'piece' || x === 'free');
+
 export function stats(state, now = Date.now()) {
   const core = state.history.filter((h) => h.core !== false);
   const thisWeek = weekStart(now);
@@ -304,13 +325,16 @@ export function stats(state, now = Date.now()) {
       start,
       minutes: inWeek.reduce((a, h) => a + h.min, 0),
       sessions: inWeek.filter((h) => h.core !== false).length,
+      days: new Set(inWeek.filter(atPiano).map((h) => new Date(h.d).toDateString())).size,
     });
   }
+  // The weekly goal is in practice days: a second session on the same day still counts in the
+  // stats and moves the queue on, but it is the spread over days that helps learning most.
   const goal = state.settings.perWeek;
   // Weeks in a row that met the goal. The current week counts once it is met, and never breaks the run.
   let run = 0;
   for (let i = weeks.length - 1; i >= 0; i--) {
-    if (weeks[i].sessions >= goal) run += 1;
+    if (weeks[i].days >= goal) run += 1;
     else if (i !== weeks.length - 1) break;
   }
   const days = new Set(state.history.map((h) => new Date(h.d).toDateString()));
@@ -319,6 +343,7 @@ export function stats(state, now = Date.now()) {
     weeks,
     goal,
     weekSessions: weeks[weeks.length - 1].sessions,
+    weekDays: weeks[weeks.length - 1].days,
     weekMinutes: weeks[weeks.length - 1].minutes,
     weeksOnTarget: run,
     totalMinutes: Math.round(state.history.reduce((a, h) => a + h.min, 0)),
@@ -335,11 +360,13 @@ export function newState(now = Date.now()) {
     profile: { created: now, genres: [], level: { play: 1, read: 1, ear: 1 }, ready: false },
     settings: {
       minutes: 10, perWeek: 5, input: 'none', view: 'keys', theme: 'system', autoEvening: false,
-      modules: { ear: true, reading: true, pieces: true }, metronome: true, guide: true,
+      modules: { ear: true, reading: true, pieces: true }, metronome: true, guide: true, fingers: true,
     },
     items: {},
     rot: 0,
     pace: 0,
+    fastRun: 0,
+    speed: 0,
     sessions: 0,
     history: [],
     quiz: { ear: [], read: [] },

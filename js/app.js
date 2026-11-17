@@ -1,10 +1,10 @@
 // Screens and flow. State lives in localStorage on this device.
 
-import { GENRES, TRACK_ITEMS, PIECE_ITEMS, TRACK_INFO, ITEM_BY_ID, ASSESS_PASSAGES } from './content.js';
+import { GENRES, TRACK_ITEMS, PIECE_ITEMS, TRACK_INFO, ITEM_BY_ID, ASSESS_PASSAGES, ASSESS_SPEED } from './content.js';
 import { parseExercise, noteToMidi } from './music.js';
 import {
   newState, buildSession, structureFor, lengthBounds, applyRating, completeSession, applyLevel,
-  startTempo, nextPiece, FAST_FACTOR, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
+  startTempo, nextPiece, FAST_FACTOR, knowsExercise, suggestLevelUp, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
 } from './planner.js';
 import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from './audio.js';
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
@@ -180,7 +180,7 @@ function routineNote(minutes, perWeek) {
   else shape = `${n} exercises: a warm-up, ${n - 2} focus exercises and a review.`;
   const rot = perWeek >= ROTATE_FROM
     ? 'Focus exercises rotate between your genres from session to session.'
-    : `With fewer than ${ROTATE_FROM} sessions a week the same exercises repeat until you have them down, because the gap between sessions is too long for rotating to help.`;
+    : `With fewer than ${ROTATE_FROM} practice days a week the same exercises repeat until you have them down, because the gap between practice days is too long for rotating to help.`;
   return `<p class="note">${shape} ${rot}</p>`;
 }
 
@@ -240,7 +240,7 @@ function onboarding() {
     if (ob.step === 'routine') {
       return show(frame(2, 'Your routine',
         `<h2>Minutes per session</h2>${chips('min', MINUTE_CHOICES, ob.minutes)}
-         <h2>Sessions per week</h2>${chips('week', [1, 2, 3, 4, 5, 6, 7], ob.perWeek)}
+         <h2>Practice days per week</h2>${chips('week', [1, 2, 3, 4, 5, 6, 7], ob.perWeek)}
          ${routineNote(ob.minutes, ob.perWeek)}
          <p class="note">Short and often beats long and rare: ten minutes a day teaches your hands more than twenty minutes every other day.</p>`), {
         min: (el) => { ob.minutes = Number(el.dataset.v); render(); },
@@ -281,7 +281,7 @@ function skillCheck(done) {
     show(`<main class="page setup">${head(4)}<h1>Your starting point</h1>
       <p class="lead">This sets which exercises come first. It adjusts as you practise, and you can change it here.</p>
       <div class="card rows">
-        <div class="row"><span><b>Playing</b><small>${LEVELS[result.play]}</small></span>${seg('play', LEVELS)}</div>
+        <div class="row"><span><b>Playing</b><small>${LEVELS[result.play]}${result.speedNote ? ` · ${result.speedNote}` : ''}</small></span>${seg('play', LEVELS)}</div>
         <div class="row"><span><b>Note reading</b><small>${READ_LEVELS[result.read]}</small></span>${seg('read', READ_LEVELS)}</div>
         <div class="row"><span><b>Ear</b><small>${EAR_LEVELS[result.ear]}</small></span>${seg('ear', EAR_LEVELS)}</div>
       </div>
@@ -289,6 +289,8 @@ function skillCheck(done) {
       lvl: (el) => { result[el.dataset.k] = Number(el.dataset.v); finish(); },
       ok: () => {
         S.profile.level.read = result.read;
+        S.speed = result.speed || 0;
+        S.fastRun = 0;
         S.profile.level.ear = result.ear;
         S.quiz = { ear: [], read: [] };
         applyLevel(S, result.play);
@@ -320,7 +322,12 @@ function skillCheck(done) {
         const v = el.dataset.v;
         if (v === 'easy' && i < ASSESS_PASSAGES.length - 1) return playStep(i + 1);
         result.play = v === 'no' ? Math.max(1, i) : Math.min(3, i + 1);
-        finish();
+        speedCheck(result.play, (level, speed, note) => {
+          result.play = Math.max(result.play, level);
+          result.speed = speed;
+          result.speedNote = note;
+          finish();
+        });
       },
     }, () => { if (stop) stop(); });
     try { renderSheet(document.getElementById('pv'), item); } catch (err) { console.error(err); }
@@ -364,6 +371,67 @@ function skillCheck(done) {
       quizStep('read', 2, () => quizStep('ear', 2, () => playStep(0)));
     },
   });
+}
+
+// The speed part of the skill check: real exercises as falling keys (no reading needed), with no
+// tempo limit. Starts at the level the passages suggested and moves up while you reach the target
+// tempo. Calls done(level, speed, note), where speed is the reached tempo divided by the target.
+function speedCheck(fromLevel, done) {
+  const first = Math.min(ASSESS_SPEED.length, fromLevel) - 1;
+  let level = 1;
+  let speed = 0;
+  let player = null;
+  const finish = () => {
+    const note = speed ? `speed ${Math.round(speed * 100)}% of target` : '';
+    done(level, speed, note);
+  };
+  const step = (i) => {
+    const item = ITEM_BY_ID[ASSESS_SPEED[i]];
+    let tempo = Math.round(item.bpm * 0.7);
+    show(`<main class="exercise">
+      <div class="topbar"><span></span><b>Skill check · speed</b><span>${i - first + 1} / ${ASSESS_SPEED.length - first}</span></div>
+      <div class="ex-head"><h1>${esc(item.t)}</h1>
+        <p>No reading this time: follow the falling keys and the finger numbers. Speed up with + until it starts to feel hard. There is no limit.</p></div>
+      <div class="stage" id="stage"></div>
+      <div class="controls">
+        <div class="ctl-row">
+          <button class="btn primary play" data-act="play" id="play">Play</button>
+          <div class="tempo">
+            <button class="round sm" data-act="slower" aria-label="Slower">−</button>
+            <div><b id="bpm"></b><small id="bpmNote"></small></div>
+            <button class="round sm" data-act="faster" aria-label="Faster">+</button>
+          </div>
+        </div>
+        <div class="two-btns">
+          <button class="btn" data-act="tooHard">Too hard, even slowly</button>
+          <button class="btn primary" data-act="limit">This is my limit</button>
+        </div>
+      </div></main>`, {
+      play: async () => { await unlock(); player.toggle(); },
+      slower: () => setTempo(tempo - Math.max(2, Math.round(tempo * 0.05))),
+      faster: () => setTempo(tempo + Math.max(2, Math.round(tempo * 0.05))),
+      tooHard: () => finish(),
+      limit: () => {
+        speed = tempo / item.bpm;
+        if (speed >= 1) level = Math.min(3, i + 2);
+        else level = Math.max(level, i + 1);
+        if (speed >= 1 && i < ASSESS_SPEED.length - 1) step(i + 1);
+        else finish();
+      },
+    }, () => player.destroy());
+    const $ = (id) => document.getElementById(id);
+    const label = () => {
+      $('bpm').textContent = `${tempo} bpm`;
+      $('bpmNote').textContent = `${Math.round((100 * tempo) / item.bpm)}% of target`;
+    };
+    const setTempo = (v) => { tempo = Math.max(30, Math.min(600, Math.round(v))); player.setTempo(tempo); label(); };
+    player = createPlayer({
+      item, stage: $('stage'), bpm: tempo, view: 'keys', guide: true, metronome: true, fingers: true,
+      onState: (on) => { $('play').textContent = on ? 'Stop' : 'Play'; $('play').classList.toggle('stop', on); },
+    });
+    label();
+  };
+  step(first);
 }
 
 // One quiz question (reading or ear). Shared by the skill check and the practice modules.
@@ -451,8 +519,8 @@ function runQuiz(kind, done) {
 // ---------------------------------------------------------------- home
 
 function weekDots(st) {
-  const n = Math.max(st.goal, st.weekSessions);
-  return `<div class="dots" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i class="${i < st.weekSessions ? 'on' : ''}"></i>`).join('')}</div>`;
+  const n = Math.max(st.goal, st.weekDays);
+  return `<div class="dots" aria-hidden="true">${Array.from({ length: n }, (_, i) => `<i class="${i < st.weekDays ? 'on' : ''}"></i>`).join('')}</div>`;
 }
 
 function planList(plan) {
@@ -466,8 +534,8 @@ function home() {
   if (!S.profile.ready) return onboarding();
   const st = stats(S);
   const plan = buildSession(S, S.settings.minutes);
-  const left = Math.max(0, st.goal - st.weekSessions);
-  const weekLine = left === 0 ? 'Weekly goal reached.' : `${st.weekSessions} of ${st.goal} sessions this week`;
+  const left = Math.max(0, st.goal - st.weekDays);
+  const weekLine = left === 0 ? 'Weekly goal reached.' : `${st.weekDays} of ${st.goal} practice days this week`;
   show(`<main class="page home">
     <header class="hero">
       <div><h1>${st.totalSessions === 0 ? 'Ready when you are' : 'Up next'}</h1><p class="muted">${weekLine}</p></div>
@@ -608,11 +676,21 @@ function summary() {
     <h1>${s.done.length ? 'Session done' : 'Session ended'}</h1>
     <p class="lead">${s.done.length ? `${minutes} min · ${s.done.length} ${s.done.length === 1 ? 'exercise' : 'exercises'}` : 'Nothing was recorded. The same exercises will be waiting.'}</p>
     ${s.news.map((t) => `<p class="win">Mastered: ${esc(t)}</p>`).join('')}
-    <div class="card"><p class="muted">${st.weekSessions >= st.goal ? 'Weekly goal reached.' : `${st.weekSessions} of ${st.goal} sessions this week`}</p>${weekDots(st)}</div>
+    <div class="card"><p class="muted">${st.weekDays >= st.goal ? 'Weekly goal reached.' : `${st.weekDays} of ${st.goal} practice days this week`}</p>${weekDots(st)}</div>
+    ${suggestLevelUp(S) ? `<div class="card levelup"><p><b>You are mastering exercises well above tempo.</b> Move up to ${LEVELS[S.profile.level.play + 1]}? Easier exercises you have not done yet will be marked as known.</p>
+      <div class="two-btns"><button class="btn" data-act="notNow">Not now</button><button class="btn primary" data-act="levelUp">Move up</button></div></div>` : ''}
     ${offer && tiles ? `<h2>Add something? Entirely optional.</h2><div class="tiles">${tiles}</div>` : ''}
     <div class="foot"><button class="btn primary" data-act="finish">Finish</button></div>
   </main>`, {
     finish: () => { stopInput(); keepAwake(false); session = null; home(); },
+    levelUp: () => {
+      applyLevel(S, S.profile.level.play + 1);
+      S.fastRun = 0;
+      save();
+      toast(`Moved up to ${LEVELS[S.profile.level.play]}.`);
+      summary();
+    },
+    notNow: () => { S.fastRun = 0; save(); summary(); },
     extra: (el) => {
       const type = el.dataset.v;
       const after = (min, quit) => {
@@ -641,12 +719,15 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
   let guide = inputMode() === 'mic' ? false : S.settings.guide;
   let metronome = S.settings.metronome;
   let view = S.settings.view;
+  let fingers = S.settings.fingers;
   let last = null;
   let best = null;
   let rang = false;
   let rating = false;
+  // A slow demo comes first for an exercise you have not yet played near its target tempo.
+  let demo = !knowsExercise(S, item);
+  let demoTempo = Math.max(36, Math.round(item.bpm * 0.5));
   const lowT = Math.max(30, Math.round(item.bpm * 0.4));
-  const highT = Math.round(item.bpm * 1.5);
   const total = minutes ? minutes * 60 : 0;
 
   show(`<main class="exercise">
@@ -676,8 +757,15 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
         <div class="seg" id="handSeg"><button data-act="hands" data-v="B">Both</button><button data-act="hands" data-v="R">Right</button><button data-act="hands" data-v="L">Left</button></div>
         <button class="toggle" data-act="guide" id="guide">Guide sound</button>
         <button class="toggle" data-act="click" id="click">Click</button>
+        <button class="toggle" data-act="fingers" id="fingers">Fingers</button>
+        <button class="toggle plain" data-act="demo" id="demoBtn">Demo</button>
       </div>
-      <button class="btn next" data-act="done">Done with this one</button>
+      <div class="demo-bar" id="demoBar" hidden>
+        <div><b>Demo</b><small id="demoNote">Slow, with finger numbers. Watch it, or play along.</small></div>
+        <button class="btn" data-act="play" id="demoAgain">Play demo</button>
+        <button class="btn primary" data-act="ready">I'm ready</button>
+      </div>
+      <button class="btn next" data-act="done" id="doneBtn">Done with this one</button>
     </div>
     <div class="sheet-modal" id="rate" hidden>
       <div class="sheet-body">
@@ -698,8 +786,11 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
 
   const $ = (id) => document.getElementById(id);
   const player = createPlayer({
-    item, stage: $('stage'), bpm: tempo, view, hands, guide, metronome,
+    item, stage: $('stage'), bpm: demo ? demoTempo : tempo, view, hands,
+    guide: demo || guide, metronome, fingers: demo || fingers, once: demo,
+    onEnd: () => { $('demoNote').textContent = 'Play it again, or tap I\'m ready when you want to start.'; refresh(); },
     onPass: (score) => {
+      if (demo) return;
       last = score;
       best = best === null ? score : Math.max(best, score);
       refresh();
@@ -707,21 +798,29 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
     onState: (on) => {
       $('play').textContent = on ? 'Stop' : 'Play';
       $('play').classList.toggle('stop', on);
+      $('demoAgain').textContent = on ? 'Stop' : 'Play demo';
       keepAwake(true);
     },
   });
 
   function refresh() {
-    $('bpm').textContent = `${tempo} bpm`;
-    $('bpmNote').textContent = tempo === item.bpm ? 'target tempo' : `target ${item.bpm}`;
+    const now = demo ? demoTempo : tempo;
+    $('bpm').textContent = `${now} bpm`;
+    $('bpmNote').textContent = demo ? 'demo tempo' : now === item.bpm ? 'target tempo' : `target ${item.bpm}`;
+    $('demoBar').hidden = !demo;
+    $('doneBtn').hidden = demo;
+    $('demoBtn').hidden = demo;
+    $('play').hidden = demo;
+    $('demoAgain').textContent = player.isPlaying() ? 'Stop' : 'Play demo';
+    $('fingers').classList.toggle('on', demo || fingers);
     $('viewSeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === view));
     $('handSeg').hidden = !player.hasBothHands();
     $('handSeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === hands));
-    $('guide').classList.toggle('on', guide);
+    $('guide').classList.toggle('on', demo || guide);
     $('click').classList.toggle('on', metronome);
     const sc = $('score');
-    sc.hidden = !listening;
-    if (listening) {
+    sc.hidden = !listening || demo;
+    if (listening && !demo) {
       if (!player.scoring()) sc.textContent = 'Switch the guide sound off and the app will listen and score you.';
       else if (last === null) sc.textContent = inputMode() === 'midi' ? 'Listening on MIDI. Play along after the count-in.' : 'Listening. Play along after the count-in.';
       else sc.innerHTML = `Last pass <b>${last}%</b> · best <b>${best}%</b>`;
@@ -742,15 +841,52 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
     }
   }, 250);
 
-  const setTempo = (v) => { tempo = Math.max(lowT, Math.min(highT, v)); player.setTempo(tempo); refresh(); };
+  // No upper limit: play as fast as you can. Steps grow with the tempo so speeding up stays quick.
+  const stepOf = (v) => Math.max(2, Math.round(v * 0.05));
+  const setTempo = (v) => {
+    const next = Math.max(lowT, Math.min(600, Math.round(v)));
+    if (demo) demoTempo = next; else tempo = next;
+    player.setTempo(next);
+    refresh();
+  };
+  const current = () => (demo ? demoTempo : tempo);
+  const enterDemo = () => {
+    demo = true;
+    $('demoNote').textContent = 'Slow, with finger numbers. Watch it, or play along.';
+    player.stop();
+    player.setGuide(true);
+    player.setFingers(true);
+    player.setOnce(true);
+    player.setTempo(demoTempo);
+    refresh();
+  };
+  const leaveDemo = () => {
+    demo = false;
+    player.stop();
+    player.setOnce(false);
+    player.setGuide(guide);
+    player.setFingers(fingers);
+    player.setTempo(tempo);
+    refresh();
+  };
 
   Object.assign(actions, {
     play: async () => { await unlock(inputMode() === 'mic'); player.toggle(); },
-    slower: () => setTempo(tempo - 4),
-    faster: () => setTempo(tempo + 4),
+    slower: () => setTempo(current() - stepOf(current())),
+    faster: () => setTempo(current() + stepOf(current())),
+    fingers: () => {
+      if (demo) return;
+      fingers = !fingers;
+      S.settings.fingers = fingers;
+      save();
+      player.setFingers(fingers);
+      refresh();
+    },
+    demo: enterDemo,
+    ready: async () => { leaveDemo(); await unlock(inputMode() === 'mic'); player.play(); },
     view: (el) => { view = el.dataset.v; S.settings.view = view; save(); player.setView(view); refresh(); },
     hands: (el) => { hands = el.dataset.v; player.setHands(hands); refresh(); },
-    guide: () => { guide = !guide; if (inputMode() !== 'mic') { S.settings.guide = guide; save(); } player.setGuide(guide); last = best = null; refresh(); },
+    guide: () => { if (demo) return; guide = !guide; if (inputMode() !== 'mic') { S.settings.guide = guide; save(); } player.setGuide(guide); last = best = null; refresh(); },
     click: () => { metronome = !metronome; S.settings.metronome = metronome; save(); player.setMetronome(metronome); refresh(); },
     quit: () => { const sec = (Date.now() - started) / 1000; onQuit(sec); },
     done: () => {
@@ -775,6 +911,8 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
   });
   refresh();
   keepAwake(true);
+  // Start the demo by itself: one tap less, and the sound is already unlocked by the tap that got here.
+  if (demo) setTimeout(() => { if (demo && !player.isPlaying() && audio().state === 'running') player.play(); }, 700);
 }
 
 // ---------------------------------------------------------------- library
@@ -834,7 +972,7 @@ function progress() {
   show(`<main class="page">
     <h1>Progress</h1>
     <section class="card">
-      <div class="hero"><div><h2 class="flat">This week</h2><p class="muted">${st.weekSessions} of ${st.goal} sessions · ${Math.round(st.weekMinutes)} min</p></div>${weekDots(st)}</div>
+      <div class="hero"><div><h2 class="flat">This week</h2><p class="muted">${st.weekDays} of ${st.goal} practice days · ${st.weekSessions} ${st.weekSessions === 1 ? 'session' : 'sessions'} · ${Math.round(st.weekMinutes)} min</p></div>${weekDots(st)}</div>
       ${st.weeksOnTarget > 1 ? `<p class="note">${st.weeksOnTarget} weeks in a row on target.</p>` : ''}
     </section>
     <div class="stat-grid">
@@ -871,7 +1009,7 @@ function settings() {
     </section>
     <p class="note">Evening mode is dim and warm, with dark sheet music and muted keys.</p>
     <h2>Minutes per session</h2>${chips('min', MINUTE_CHOICES, s.minutes)}
-    <h2>Sessions per week</h2>${chips('week', [1, 2, 3, 4, 5, 6, 7], s.perWeek)}
+    <h2>Practice days per week</h2>${chips('week', [1, 2, 3, 4, 5, 6, 7], s.perWeek)}
     ${routineNote(s.minutes, s.perWeek)}
     <h2>Optional extras after a session</h2>
     <section class="card rows">
