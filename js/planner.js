@@ -203,6 +203,25 @@ const PACE_RUN = 3;
 // After this many exercises in a row mastered well above tempo, the app suggests moving up a level.
 export const LEVEL_UP_RUN = 3;
 
+// ---- speed part of the skill check
+// One exercise per level. Reaching this share of its target tempo clears that level.
+export const SPEED_CLEAR = 0.9;
+
+// Decides the next step of the speed check from the results so far ({ index: reached / target }).
+// It moves up a level after a clear and down a level after a miss, never testing anything twice.
+// Returns { next } for the exercise to test next, or { level, speed } when done: the playing level
+// is the highest level cleared (1 if none), and speed is the result on that exercise.
+export function speedCheckStep(results, current, count) {
+  const cleared = results[current] >= SPEED_CLEAR;
+  const next = cleared ? current + 1 : current - 1;
+  if (next >= 0 && next < count && results[next] === undefined) return { next };
+  const tested = Object.keys(results).map(Number);
+  const passed = tested.filter((i) => results[i] >= SPEED_CLEAR);
+  const best = passed.length ? Math.max(...passed) : -1;
+  const speed = best >= 0 ? results[best] : results[Math.min(...tested)];
+  return { level: best + 1 || 1, speed };
+}
+
 // Tempo a new exercise starts at: 70% of the target, or more once you have shown you are faster
 // (in the skill check, or with a run of solid ratings at full tempo). There is no upper limit.
 export function startTempo(state, item) {

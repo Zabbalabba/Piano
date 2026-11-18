@@ -4,7 +4,7 @@ import { GENRES, TRACK_ITEMS, PIECE_ITEMS, TRACK_INFO, ITEM_BY_ID, ASSESS_PASSAG
 import { parseExercise, noteToMidi } from './music.js';
 import {
   newState, buildSession, structureFor, lengthBounds, applyRating, completeSession, applyLevel,
-  startTempo, nextPiece, FAST_FACTOR, knowsExercise, suggestLevelUp, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
+  startTempo, nextPiece, FAST_FACTOR, knowsExercise, suggestLevelUp, speedCheckStep, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
 } from './planner.js';
 import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from './audio.js';
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
@@ -323,7 +323,7 @@ function skillCheck(done) {
         if (v === 'easy' && i < ASSESS_PASSAGES.length - 1) return playStep(i + 1);
         result.play = v === 'no' ? Math.max(1, i) : Math.min(3, i + 1);
         speedCheck(result.play, (level, speed, note) => {
-          result.play = Math.max(result.play, level);
+          result.play = level; // the speed check measures playing directly; the passages only chose where it started
           result.speed = speed;
           result.speedNote = note;
           finish();
@@ -378,20 +378,22 @@ function skillCheck(done) {
 // tempo. Calls done(level, speed, note), where speed is the reached tempo divided by the target.
 function speedCheck(fromLevel, done) {
   const first = Math.min(ASSESS_SPEED.length, fromLevel) - 1;
-  let level = 1;
-  let speed = 0;
+  const results = {};
   let player = null;
-  const finish = () => {
-    const note = speed ? `speed ${Math.round(speed * 100)}% of target` : '';
-    done(level, speed, note);
+  const record = (i, ratio) => {
+    results[i] = ratio;
+    const r = speedCheckStep(results, i, ASSESS_SPEED.length);
+    if (r.next !== undefined) return step(r.next);
+    const note = r.speed ? `cleared level ${r.level} · ${Math.round(r.speed * 100)}% of target` : '';
+    done(r.level, r.speed || 0, note);
   };
   const step = (i) => {
     const item = ITEM_BY_ID[ASSESS_SPEED[i]];
     let tempo = Math.round(item.bpm * 0.7);
     show(`<main class="exercise">
-      <div class="topbar"><span></span><b>Skill check · speed</b><span>${i - first + 1} / ${ASSESS_SPEED.length - first}</span></div>
+      <div class="topbar"><span></span><b>Skill check · speed</b><span>Exercise ${Object.keys(results).length + 1}</span></div>
       <div class="ex-head"><h1>${esc(item.t)}</h1>
-        <p>No reading this time: follow the falling keys and the finger numbers. Speed up with + until it starts to feel hard. There is no limit.</p></div>
+        <p>No reading this time: follow the falling keys and the finger numbers. Speed up with + until it starts to feel hard. There is no limit. Reaching 90% of the target tempo clears this level.</p></div>
       <div class="stage" id="stage"></div>
       <div class="controls">
         <div class="ctl-row">
@@ -410,14 +412,8 @@ function speedCheck(fromLevel, done) {
       play: async () => { await unlock(); player.toggle(); },
       slower: () => setTempo(tempo - Math.max(2, Math.round(tempo * 0.05))),
       faster: () => setTempo(tempo + Math.max(2, Math.round(tempo * 0.05))),
-      tooHard: () => finish(),
-      limit: () => {
-        speed = tempo / item.bpm;
-        if (speed >= 1) level = Math.min(3, i + 2);
-        else level = Math.max(level, i + 1);
-        if (speed >= 1 && i < ASSESS_SPEED.length - 1) step(i + 1);
-        else finish();
-      },
+      tooHard: () => record(i, 0),
+      limit: () => record(i, tempo / item.bpm),
     }, () => player.destroy());
     const $ = (id) => document.getElementById(id);
     const label = () => {

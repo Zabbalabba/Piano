@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   newState, buildSession, structureFor, allocate, applyRating, completeSession, applyLevel,
   lengthBounds, stats, weekStart, DAY, nextPiece, startTempo, FAST_FACTOR,
-  knowsExercise, suggestLevelUp,
+  knowsExercise, suggestLevelUp, speedCheckStep,
 } from '../js/planner.js';
 import { TRACK_ITEMS, ITEM_BY_ID } from '../js/content.js';
 
@@ -214,4 +214,30 @@ test('three fast masteries in a row suggest moving up a level', () => {
   assert.equal(suggestLevelUp(s), true);
   applyRating(s, 'fd-lh', 'hard', 50, 0);
   assert.equal(suggestLevelUp(s), false);
+});
+
+test('speed check: steps down after a miss and places you at the highest level cleared', () => {
+  // The case from a real backup: passages said level 3, the level 3 exercise reached only 54%.
+  assert.deepEqual(speedCheckStep({ 2: 0.54 }, 2, 3), { next: 1 });
+  assert.deepEqual(speedCheckStep({ 2: 0.54, 1: 1.1 }, 1, 3), { level: 2, speed: 1.1 });
+  assert.deepEqual(speedCheckStep({ 2: 0.54, 1: 0.6 }, 1, 3), { next: 0 });
+  assert.deepEqual(speedCheckStep({ 2: 0.54, 1: 0.6, 0: 0.95 }, 0, 3), { level: 1, speed: 0.95 });
+  assert.deepEqual(speedCheckStep({ 2: 0.54, 1: 0.6, 0: 0.5 }, 0, 3), { level: 1, speed: 0.5 });
+});
+
+test('speed check: steps up after a clear, never retesting', () => {
+  assert.deepEqual(speedCheckStep({ 0: 1.3 }, 0, 3), { next: 1 });
+  assert.deepEqual(speedCheckStep({ 0: 1.3, 1: 0.92 }, 1, 3), { next: 2 });
+  assert.deepEqual(speedCheckStep({ 0: 1.3, 1: 0.92, 2: 1.2 }, 2, 3), { level: 3, speed: 1.2 });
+  assert.deepEqual(speedCheckStep({ 0: 1.3, 1: 0.7 }, 1, 3), { level: 1, speed: 1.3 });
+  assert.deepEqual(speedCheckStep({ 1: 0.95, 2: 0.5 }, 2, 3), { level: 2, speed: 0.95 });
+});
+
+test('redoing the check at a lower level brings skipped exercises back', () => {
+  const s = mk(10, 4);
+  applyLevel(s, 3);
+  assert.equal(s.items['tq-g-ht'].st, 'skipped');
+  applyLevel(s, 2);
+  assert.equal(s.items['tq-g-ht'], undefined);
+  assert.equal(s.items['tq-five-r'].st, 'skipped');
 });
