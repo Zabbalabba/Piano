@@ -2,13 +2,22 @@
 // (falling keys on a canvas, or scrolling sheet music).
 
 import { parseExercise, isBlackKey, midiToName } from './music.js';
-import { audio, playNote, click, silence } from './audio.js';
+import { audio, playNote, click, silence, resumeIfPaused } from './audio.js';
 import { renderSheet, cursorX } from './sheet.js';
 import { onNote, hears, inputMode } from './input.js';
 
+// Shown when the phone paused the sound and it could not be restarted without a tap.
+const defaultStall = () => {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = 'The phone paused the sound. Tap Play to start again.';
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 4000);
+};
+
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true, metronome = true, fingers = true, once = false, onPass, onState, onEnd }) {
+export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true, metronome = true, fingers = true, once = false, onPass, onState, onEnd, onStall = defaultStall }) {
   const p = parseExercise(item);
   const countIn = p.barBeats;
   const cycle = countIn + p.totalBeats;
@@ -37,7 +46,8 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
 
   const active = () => p.events.filter((e) => hands === 'B' || e.hand === hands);
   const spb = () => 60 / bpm;
-  const beatNow = () => (audio().currentTime - t0) / spb();
+  // Never before the start: in the first instant the clock can be just short of t0.
+  const beatNow = () => Math.max(0, (audio().currentTime - t0) / spb());
 
   // ---- keyboard geometry
   let lo = Math.min(...p.events.map((e) => e.midi));
@@ -300,8 +310,36 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     else drawSheet(pos);
   }
 
+  // Watchdog: if the audio clock stops moving (the phone paused the sound), try to restart it, and
+  // if that does not work, stop and say so instead of sitting frozen.
+  let clockAt = -1;
+  let clockSeen = 0;
+  let stalledSince = 0;
+  function watchClock() {
+    const now = performance.now();
+    const ct = audio().currentTime;
+    if (ct !== clockAt) {
+      clockAt = ct;
+      clockSeen = now;
+      stalledSince = 0;
+      return true;
+    }
+    if (now - clockSeen < 250) return true;
+    if (!stalledSince) {
+      stalledSince = now;
+      resumeIfPaused();
+    }
+    if (now - stalledSince > 1500) {
+      stop();
+      if (onStall) onStall();
+      return false;
+    }
+    return true;
+  }
+
   function frame() {
     if (!playing) return;
+    if (!watchClock()) return;
     if (once && beatNow() >= cycle) {
       stop();
       if (onEnd) onEnd();
@@ -316,6 +354,10 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
   function play() {
     if (playing || destroyed) return;
     playing = true;
+    resumeIfPaused();
+    clockAt = -1;
+    clockSeen = performance.now();
+    stalledSince = 0;
     t0 = audio().currentTime + 0.12;
     scheduled = 0;
     passIndex = -1;

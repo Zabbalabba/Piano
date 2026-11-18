@@ -18,6 +18,7 @@ export function audio() {
     comp.threshold.value = -14;
     comp.ratio.value = 4;
     master.connect(comp).connect(ctx.destination);
+    ctx.addEventListener('statechange', resumeIfPaused);
     notesOut = ctx.createGain();
     notesOut.connect(master);
     try {
@@ -51,8 +52,18 @@ export function audio() {
 export async function unlock(recording = false) {
   audio();
   loadPiano();
+  keepRunning = true;
   try {
-    if (navigator.audioSession) navigator.audioSession.type = recording ? 'play-and-record' : 'playback';
+    // Only change the iOS audio mode when it really has to change: switching it while sound is
+    // running can make iOS pause the audio a moment later. Once the microphone mode is on it stays
+    // on for the rest of the visit, since it plays back fine too.
+    const s = navigator.audioSession;
+    const want = recording || (s && s.type === 'play-and-record') ? 'play-and-record' : 'playback';
+    if (s && s.type !== want) {
+      s.type = want;
+      setTimeout(resumeIfPaused, 120);
+      setTimeout(resumeIfPaused, 500);
+    }
   } catch { /* not supported */ }
   if (ctx.state !== 'running') {
     try { await ctx.resume(); } catch { /* ignore */ }
@@ -64,6 +75,13 @@ export async function unlock(recording = false) {
     silentEl.play().catch(() => {});
   }
   return ctx;
+}
+
+// iOS can pause ("interrupt") the audio at any time, e.g. after a change of audio mode or a call.
+// While the app wants sound, try to start it again straight away.
+let keepRunning = false;
+export function resumeIfPaused() {
+  if (ctx && keepRunning && ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {});
 }
 
 const live = new Set();
