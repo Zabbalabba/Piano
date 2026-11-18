@@ -4,7 +4,7 @@ import { GENRES, TRACK_ITEMS, PIECE_ITEMS, TRACK_INFO, ITEM_BY_ID, ASSESS_PASSAG
 import { parseExercise, noteToMidi } from './music.js';
 import {
   newState, buildSession, structureFor, lengthBounds, applyRating, completeSession, applyLevel,
-  startTempo, nextPiece, FAST_FACTOR, knowsExercise, suggestLevelUp, speedCheckStep, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
+  startTempo, nextPiece, FAST_FACTOR, knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
 } from './planner.js';
 import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from './audio.js';
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
@@ -640,6 +640,12 @@ function nextSlot() {
       session.seconds += Math.min(seconds, slot.minutes * 120);
       endSession();
     },
+    onSwap: (easier, seconds) => {
+      session.seconds += Math.min(seconds, slot.minutes * 120);
+      slot.minutes = Math.max(1, Math.round((slot.minutes - seconds / 60) * 2) / 2);
+      slot.item = easier;
+      nextSlot();
+    },
   });
 }
 
@@ -694,11 +700,13 @@ function summary() {
         summary();
       };
       if (type === 'piece') {
-        return runExercise({
-          item: piece, minutes: 5, label: 'Piece',
+        const run = (it, label) => runExercise({
+          item: it, minutes: 5, label,
           onDone: (r) => after(r.seconds / 60, false),
           onQuit: (sec) => after(sec / 60, true),
+          onSwap: (easier) => run(easier, easier.kind === 'piece' ? 'Piece' : 'Build-up exercise'),
         });
+        return run(piece, 'Piece');
       }
       runQuiz(type, after);
     },
@@ -707,7 +715,7 @@ function summary() {
 
 // ---------------------------------------------------------------- exercise screen
 
-function runExercise({ item, minutes, label, onDone, onQuit }) {
+function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
   const started = Date.now();
   const listening = inputMode() !== 'none';
   let tempo = startTempo(S, item);
@@ -735,10 +743,17 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
     <div class="ex-head">
       <h1>${esc(item.t)}</h1>
       <p>${esc(item.focus)}</p>
+      <p class="gain"><b>What it does for you:</b> ${esc(item.gain)}</p>
       <details><summary>How to practise it</summary><p>${esc(item.tip)}${item.swing ? ' Swing feel: play the eighth notes long–short.' : ''}${item.src ? ` <span class="muted">(${esc(item.src)})</span>` : ''}</p></details>
     </div>
     <div class="stage" id="stage"></div>
     <div class="score" id="score" hidden></div>
+    <div class="pos-row" id="posRow">
+      <button class="round sm" data-act="back" aria-label="Previous note">◀</button>
+      <span id="posLabel"></span>
+      <button class="round sm" data-act="fwd" aria-label="Next note">▶</button>
+      <button class="mini" data-act="toStart" id="toStart">From the start</button>
+    </div>
     <div class="controls">
       <div class="ctl-row">
         <button class="btn primary play" data-act="play" id="play">Play</button>
@@ -757,9 +772,10 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
         <button class="toggle plain" data-act="demo" id="demoBtn">Demo</button>
       </div>
       <div class="demo-bar" id="demoBar" hidden>
-        <div><b>Demo</b><small id="demoNote">Slow, with finger numbers. Watch it, or play along.</small></div>
-        <button class="btn" data-act="play" id="demoAgain">Play demo</button>
+        <div><b>Walkthrough</b><small id="demoNote">Step through it with ◀ ▶ or drag the notes. Each step sounds the note and shows the finger.</small></div>
+        <button class="btn" data-act="play" id="demoAgain">Play slowly</button>
         <button class="btn primary" data-act="ready">I'm ready</button>
+        <button class="link tight" data-act="tooHard">Too hard for now?</button>
       </div>
       <button class="btn next" data-act="done" id="doneBtn">Done with this one</button>
     </div>
@@ -773,6 +789,17 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
           <button class="btn" data-act="rate" data-v="solid"><b>Solid</b><small>Ready for more</small></button>
         </div>
         <button class="link" data-act="resume">Keep practising</button>
+        <button class="link tight" data-act="tooHard">Too hard for now? Build up to it first</button>
+      </div>
+    </div>
+    <div class="sheet-modal" id="twice" hidden>
+      <div class="sheet-body">
+        <h2>This one has felt hard twice in a row</h2>
+        <p class="muted" id="twiceText"></p>
+        <div class="two-btns">
+          <button class="btn" data-act="keepIt">Keep at it</button>
+          <button class="btn primary" data-act="buildUp">Build up first</button>
+        </div>
       </div>
     </div>
   </main>`, {}, () => {
@@ -784,7 +811,8 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
   const player = createPlayer({
     item, stage: $('stage'), bpm: demo ? demoTempo : tempo, view, hands,
     guide: demo || guide, metronome, fingers: demo || fingers, once: demo,
-    onEnd: () => { $('demoNote').textContent = 'Play it again, or tap I\'m ready when you want to start.'; refresh(); },
+    onEnd: () => { $('demoNote').textContent = 'Step through any part again, play it slowly once more, or tap I\'m ready.'; refresh(); },
+    onPosition: (pos) => showPosition(pos),
     onPass: (score) => {
       if (demo) return;
       last = score;
@@ -794,10 +822,17 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
     onState: (on) => {
       $('play').textContent = on ? 'Stop' : 'Play';
       $('play').classList.toggle('stop', on);
-      $('demoAgain').textContent = on ? 'Stop' : 'Play demo';
+      $('demoAgain').textContent = on ? 'Stop' : 'Play slowly';
+      $('posRow').classList.toggle('busy', on);
       keepAwake(true);
     },
   });
+
+  function showPosition(pos) {
+    $('posLabel').textContent = pos.atStart ? `Start · bar 1 of ${pos.nBars}` : `Bar ${pos.bar} of ${pos.nBars}`;
+    $('toStart').hidden = pos.atStart;
+    $('play').textContent = player.isPlaying() ? 'Stop' : pos.atStart ? 'Play' : `Play from bar ${pos.bar}`;
+  }
 
   function refresh() {
     const now = demo ? demoTempo : tempo;
@@ -807,7 +842,7 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
     $('doneBtn').hidden = demo;
     $('demoBtn').hidden = demo;
     $('play').hidden = demo;
-    $('demoAgain').textContent = player.isPlaying() ? 'Stop' : 'Play demo';
+    $('demoAgain').textContent = player.isPlaying() ? 'Stop' : 'Play slowly';
     $('fingers').classList.toggle('on', demo || fingers);
     $('viewSeg').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === view));
     $('handSeg').hidden = !player.hasBothHands();
@@ -848,7 +883,7 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
   const current = () => (demo ? demoTempo : tempo);
   const enterDemo = () => {
     demo = true;
-    $('demoNote').textContent = 'Slow, with finger numbers. Watch it, or play along.';
+    $('demoNote').textContent = 'Step through it with ◀ ▶ or drag the notes. Each step sounds the note and shows the finger.';
     player.stop();
     player.setGuide(true);
     player.setFingers(true);
@@ -879,7 +914,30 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
       refresh();
     },
     demo: enterDemo,
-    ready: async () => { leaveDemo(); await unlock(inputMode() === 'mic'); player.play(); },
+    ready: async () => { leaveDemo(); player.setPosition(0); await unlock(inputMode() === 'mic'); player.play(); },
+    back: async () => { await unlock(); player.step(-1); },
+    fwd: async () => { await unlock(); player.step(1); },
+    toStart: () => player.setPosition(0),
+    // Set this one aside for now and build up with the exercise before it.
+    tooHard: () => {
+      const easier = setAside(S, item.id);
+      if (!easier) {
+        toast('This is already the first step in its track. Try it slower, or one hand at a time.');
+        return;
+      }
+      save();
+      toast(`Set aside for now. It comes back in a couple of sessions, after "${easier.t}".`);
+      const sec = (Date.now() - started) / 1000;
+      if (onSwap) onSwap(easier, sec);
+      else onQuit(sec);
+    },
+    keepIt: () => finishRating(),
+    buildUp: () => {
+      const easier = setAside(S, item.id);
+      save();
+      if (easier) toast(`Next up: "${easier.t}". This one comes back after a couple of sessions.`);
+      finishRating();
+    },
     view: (el) => { view = el.dataset.v; S.settings.view = view; save(); player.setView(view); refresh(); },
     hands: (el) => { hands = el.dataset.v; player.setHands(hands); refresh(); },
     guide: () => { if (demo) return; guide = !guide; if (inputMode() !== 'mic') { S.settings.guide = guide; save(); } player.setGuide(guide); last = best = null; refresh(); },
@@ -898,17 +956,29 @@ function runExercise({ item, minutes, label, onDone, onQuit }) {
     rate: (el) => {
       const info = applyRating(S, item.id, el.dataset.v, tempo);
       save();
+      lastRating = { rating: el.dataset.v, info };
+      const easier = easierThan(item);
+      // Hard twice in a row: offer to build up with an easier exercise first. Never mid-exercise.
+      if (info.hardTwice && easier) {
+        $('rate').hidden = true;
+        $('twiceText').textContent = `You could build up with "${easier.t}" first. This one is not dropped: it comes back after a couple of sessions, at a gentler tempo.`;
+        $('twice').hidden = false;
+        return;
+      }
       if (info.fast) toast('Well above tempo: mastered in one go. It comes back for review in a week.');
       else if (info.becameMastered) toast('Mastered. It comes back for a quick review in a few days.');
       else if (el.dataset.v === 'solid' && !info.atTempo) toast(`Next time a little faster: ${info.nextTempo} bpm.`);
       else if (el.dataset.v === 'hard') toast(`Next time a little slower: ${info.nextTempo} bpm.`);
-      onDone({ rating: el.dataset.v, seconds: (Date.now() - started) / 1000, info });
+      finishRating();
     },
   });
+  let lastRating = null;
+  function finishRating() {
+    onDone({ ...lastRating, seconds: (Date.now() - started) / 1000 });
+  }
   refresh();
+  showPosition(player.position());
   keepAwake(true);
-  // Start the demo by itself: one tap less, and the sound is already unlocked by the tap that got here.
-  if (demo) setTimeout(() => { if (demo && !player.isPlaying() && audio().state === 'running') player.play(); }, 700);
 }
 
 // ---------------------------------------------------------------- library
@@ -946,14 +1016,15 @@ function library(focus) {
   </main>${nav(focus === 'pieces' ? 'home' : 'library')}`, {
     go,
     open: async (el) => {
-      const item = ITEM_BY_ID[el.dataset.id];
       await prepareSound();
       const back = () => { stopInput(); keepAwake(false); library(focus); };
-      runExercise({
+      const run = (item) => runExercise({
         item, minutes: 0, label: item.kind === 'piece' ? 'Piece' : 'Free practice',
         onDone: (r) => { recordExtra(item.kind === 'piece' ? 'piece' : 'free', r.seconds / 60, false); back(); },
         onQuit: back,
+        onSwap: (easier) => run(easier),
       });
+      run(ITEM_BY_ID[el.dataset.id]);
     },
   });
 }

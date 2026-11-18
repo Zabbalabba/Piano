@@ -1,6 +1,6 @@
 // Session planning and progress rules. Pure functions over the saved state, no DOM.
 
-import { TRACK_ITEMS, PIECE_ITEMS, ITEM_BY_ID, GENRES } from './content.js';
+import { TRACK_ITEMS, PIECE_ITEMS, ITEM_BY_ID, GENRES, PREP } from './content.js';
 import { parseExercise } from './music.js';
 
 export const DAY = 86400000;
@@ -41,8 +41,46 @@ export function lengthBounds(target) {
 const prog = (state, id) => state.items[id] || { st: 'new', solid: 0, reps: 0 };
 const isDone = (state, id) => ['mastered', 'skipped'].includes(prog(state, id).st);
 
+// Exercises still to learn in a track, in order. One set aside as "too hard for now" waits until a
+// couple of sessions have passed, unless nothing else is left.
 export function remaining(state, track) {
-  return TRACK_ITEMS[track].filter((x) => !isDone(state, x.id));
+  const left = TRACK_ITEMS[track].filter((x) => !isDone(state, x.id));
+  const ready = left.filter((x) => !(prog(state, x.id).later > state.sessions));
+  return ready.length ? ready : left;
+}
+
+// How many sessions an exercise set aside as too hard waits before it comes back.
+export const SET_ASIDE_SESSIONS = 2;
+
+// The exercise to build up with first, or null when this is already the first step.
+export function easierThan(item) {
+  if (PREP[item.id]) return ITEM_BY_ID[PREP[item.id]];
+  if (item.kind === 'piece') {
+    const pieces = PIECE_ITEMS[item.track];
+    const i = pieces.findIndex((x) => x.id === item.id);
+    if (i > 0) return pieces[i - 1];
+    const ex = TRACK_ITEMS[item.track];
+    return ex[ex.length - 1];
+  }
+  const list = TRACK_ITEMS[item.track];
+  const i = list.findIndex((x) => x.id === item.id);
+  return i > 0 ? list[i - 1] : null;
+}
+
+// Set an exercise aside for now: it comes back after a couple of sessions at a gentler tempo, and
+// the easier one is put back in the queue (even if it was below your level). Returns the easier one.
+export function setAside(state, id) {
+  const item = ITEM_BY_ID[id];
+  const easier = easierThan(item);
+  if (!easier) return null;
+  const p = (state.items[id] = { ...prog(state, id) });
+  if (p.st === 'skipped' || p.st === 'new') p.st = 'learning';
+  p.later = state.sessions + SET_ASIDE_SESSIONS;
+  p.bpm = Math.min(p.bpm || Infinity, Math.round(item.bpm * 0.6));
+  p.hardRun = 0;
+  const e = state.items[easier.id];
+  if (e && e.st === 'skipped') delete state.items[easier.id];
+  return easier;
 }
 
 export function trackProgress(state, track) {
@@ -249,6 +287,7 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
   p.last = now;
   p.bpm = tempo;
   if (rating !== 'hard') p.top = Math.max(p.top || 0, tempo);
+  p.hardRun = rating === 'hard' ? (p.hardRun || 0) + 1 : 0;
   const atTempo = tempo >= item.bpm * 0.9;
   const fast = rating === 'solid' && tempo >= item.bpm * FAST_FACTOR;
   let becameMastered = false;
@@ -283,7 +322,7 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
   else if (rating === 'hard' || (rating === 'solid' && !atTempo)) state.pace = 0;
   if (becameMastered && fast) state.fastRun = (state.fastRun || 0) + 1;
   else if (becameMastered || rating === 'hard') state.fastRun = 0;
-  return { becameMastered, fast: becameMastered && fast, atTempo, nextTempo: p.bpm, target: item.bpm };
+  return { becameMastered, fast: becameMastered && fast, atTempo, nextTempo: p.bpm, target: item.bpm, hardTwice: p.hardRun >= 2 };
 }
 
 // Record a finished (or partly finished) session and move the queue on.

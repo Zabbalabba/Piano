@@ -235,3 +235,15 @@ button:disabled { opacity: 0.4; cursor: default; }
 .two-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .levelup { margin-top: 16px; text-align: left; border: 1px solid var(--good); }
 .levelup p { margin-bottom: 12px; }
+
+.ex-head .gain { color: var(--text); font-size: 0.84rem; margin-top: 4px; line-height: 1.35; }
+.ex-head .gain b { color: var(--muted); font-weight: 600; }
+.pos-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pos-row span { flex: 1; text-align: center; font-size: 0.88rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pos-row.busy { opacity: 0.4; pointer-events: none; }
+.pos-row .round.sm { width: 40px; height: 40px; font-size: 0.9rem; }
+.mini { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 6px 10px; font-size: 0.8rem; font-weight: 600; min-height: 36px; }
+.mini[hidden] { display: none; }
+.link.tight { padding: 6px 4px 2px; grid-column: 1 / -1; font-size: 0.85rem; }
+.keys-canvas { touch-action: none; cursor: grab; }
+@media (orientation: landscape) and (max-height: 500px) { .ex-head .gain { display: none; } }

@@ -3,7 +3,7 @@
 
 import { parseExercise, isBlackKey, midiToName } from './music.js';
 import { audio, playNote, click, silence, resumeIfPaused } from './audio.js';
-import { renderSheet, cursorX } from './sheet.js';
+import { renderSheet, cursorX, beatAtX } from './sheet.js';
 import { onNote, hears, inputMode } from './input.js';
 
 // Shown when the phone paused the sound and it could not be restarted without a tap.
@@ -17,10 +17,14 @@ const defaultStall = () => {
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true, metronome = true, fingers = true, once = false, onPass, onState, onEnd, onStall = defaultStall }) {
+export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true, metronome = true, fingers = true, once = false, onPass, onState, onEnd, onPosition, onStall = defaultStall }) {
   const p = parseExercise(item);
   const countIn = p.barBeats;
-  const cycle = countIn + p.totalBeats;
+  // Where you are in the exercise while stopped (in beats), and where playing starts and loops back
+  // to: the start of the bar you are in. Drag the notes or step with the arrows to move.
+  let at = 0;
+  let from = 0;
+  const cycleLen = () => countIn + p.totalBeats - from;
   let playing = false;
   let t0 = 0;
   let scheduled = 0; // absolute beat up to which audio has been queued
@@ -45,6 +49,9 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
   const badge = sheetWrap.querySelector('.count-badge');
 
   const active = () => p.events.filter((e) => hands === 'B' || e.hand === hands);
+  const inPlay = () => active().filter((e) => e.t >= from - 1e-6);
+  // Position in the exercise while playing; negative during the count-in before `from`.
+  const posNow = () => from + (beatNow() % cycleLen()) - countIn;
   const spb = () => 60 / bpm;
   // Never before the start: in the first instant the clock can be just short of t0.
   const beatNow = () => Math.max(0, (audio().currentTime - t0) / spb());
@@ -102,6 +109,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
   function schedule() {
     const now = beatNow();
     const horizon = now + 0.25 / spb();
+    const cycle = cycleLen();
     const c0 = Math.floor(Math.max(0, scheduled) / cycle);
     const c1 = Math.floor(horizon / cycle);
     for (let c = c0; c <= c1; c++) {
@@ -117,8 +125,8 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
         }
       }
       if (guide) {
-        for (const e of active()) {
-          const abs = base + countIn + e.t;
+        for (const e of inPlay()) {
+          const abs = base + countIn + e.t - from;
           if (abs < scheduled || abs >= horizon) continue;
           playNote(e.midi, t0 + abs * spb(), e.d * spb(), e.hand === 'L' ? 0.58 : 0.78, 0.16);
         }
@@ -134,7 +142,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
 
   function finishPass() {
     if (!scoring()) return;
-    const list = active();
+    const list = inPlay();
     if (!list.length) return;
     const hits = list.filter((e) => marks.get(e) === 'hit').length;
     const wrong = inputMode() === 'midi' ? extras : 0;
@@ -143,7 +151,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
   }
 
   function track(pos) {
-    const pass = Math.floor(beatNow() / cycle);
+    const pass = Math.floor(beatNow() / cycleLen());
     if (pass !== passIndex) {
       if (passIndex >= 0) finishPass();
       passIndex = pass;
@@ -152,7 +160,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     }
     if (!scoring()) return;
     const sec = spb();
-    for (const e of active()) {
+    for (const e of inPlay()) {
       if (marks.has(e)) continue;
       const dt = (pos - e.t) * sec;
       if (dt > WINDOW_AFTER()) marks.set(e, 'miss');
@@ -163,10 +171,10 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
   function midiIn(midi) {
     pressed.set(midi, performance.now());
     if (!playing || !scoring()) return;
-    const pos = (beatNow() % cycle) - countIn;
+    const pos = posNow();
     const sec = spb();
     let best = null;
-    for (const e of active()) {
+    for (const e of inPlay()) {
       if (e.midi !== midi || marks.has(e)) continue;
       const dt = Math.abs(pos - e.t) * sec;
       if (dt <= 0.22 && (!best || dt < best.dt)) best = { e, dt };
@@ -193,8 +201,11 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     };
     const colR = css('--rh');
     const colL = css('--lh');
-    const visible = Math.max(4, p.barBeats * 1.5);
+    // Show fewer beats ahead on a short stage, so notes stay big enough to read their finger numbers.
+    const visible = Math.max(2.5, Math.min(Math.max(4, p.barBeats * 1.5), (H - Math.min(120, Math.max(64, H * 0.24))) / 30));
     const ppb = lineY / visible;
+    lastPpb = ppb;
+    const cycle = cycleLen();
 
     // lanes for the C keys and bar lines
     g.strokeStyle = css('--line');
@@ -210,6 +221,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     }
     for (let c = 0; c < 2; c++) {
       for (let b = 0; b <= p.nBars; b++) {
+        if (c > 0 && b * p.barBeats < from - 1e-6) continue;
         const y = lineY - (c * cycle + b * p.barBeats - pos) * ppb;
         if (y < 0 || y > lineY) continue;
         g.globalAlpha = 0.6;
@@ -225,6 +237,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     const list = active();
     for (let c = 0; c < 2; c++) {
       for (const e of list) {
+        if (c > 0 && (!playing || e.t < from - 1e-6)) continue;
         const t = e.t + c * cycle;
         const yBottom = lineY - (t - pos) * ppb;
         const h = Math.max(6, e.d * ppb - 3);
@@ -239,16 +252,17 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
           g.beginPath();
           g.roundRect(x + 1.5, top, w - 3, bottom - top, 4);
           g.fill();
-          if (fingers && e.f && bottom - top >= 15 && w >= 11) {
+          if (fingers && e.f && bottom - top >= 11 && w >= 10) {
+            const size = Math.min(14, Math.round(w * 0.62), Math.round(bottom - top - 2));
             g.fillStyle = css('--on-note');
-            g.font = `700 ${Math.min(14, Math.round(w * 0.62))}px system-ui, sans-serif`;
+            g.font = `700 ${size}px system-ui, sans-serif`;
             g.textAlign = 'center';
             g.textBaseline = 'alphabetic';
-            g.fillText(String(e.f), x + w / 2, bottom - 4);
+            g.fillText(String(e.f), x + w / 2, bottom - Math.max(2, (bottom - top - size) / 2));
           }
         }
         g.globalAlpha = 1;
-        if (c === 0 && playing && pos >= e.t && pos < e.t + e.d) sounding.set(e.midi, e.hand);
+        if (c === 0 && pos >= e.t - 1e-6 && pos < e.t + e.d) sounding.set(e.midi, e.hand);
       }
     }
 
@@ -279,8 +293,8 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     g.fillStyle = css('--accent');
     g.fillRect(0, lineY - 2, W, 2);
 
-    if (playing && pos < 0) {
-      const n = Math.floor((countIn + pos) / p.pulse) + 1;
+    if (playing && pos < from) {
+      const n = Math.floor((countIn + pos - from) / p.pulse) + 1;
       g.fillStyle = css('--text');
       g.globalAlpha = 0.85;
       g.font = '700 64px system-ui, sans-serif';
@@ -290,25 +304,75 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     }
   }
 
-  function drawSheet(pos) {
+  function drawSheet(pos, follow) {
     if (!sheet) return;
-    const x = cursorX(sheet.anchors, Math.max(0, pos)) * (sheet.scale || 1);
+    const scale = sheet.scale || 1;
+    const x = cursorX(sheet.anchors, Math.max(from, pos)) * scale;
     const lead = scroller.clientWidth * 0.3;
-    const scroll = Math.max(0, Math.min(sheet.width * (sheet.scale || 1) - scroller.clientWidth, x - lead));
-    if (playing) scroller.scrollLeft = scroll;
+    const scroll = Math.max(0, Math.min(sheet.width * scale - scroller.clientWidth, x - lead));
+    if (follow && Math.abs(scroller.scrollLeft - scroll) > 0.5) {
+      ignoreScrollUntil = performance.now() + 120;
+      scroller.scrollLeft = scroll;
+    }
     cursor.style.transform = `translateX(${x - scroller.scrollLeft}px)`;
-    cursor.style.opacity = playing ? 1 : 0.35;
-    if (playing && pos < 0) {
-      badge.textContent = String(Math.floor((countIn + pos) / p.pulse) + 1);
+    cursor.style.opacity = playing ? 1 : 0.8;
+    if (playing && pos < from) {
+      badge.textContent = String(Math.floor((countIn + pos - from) / p.pulse) + 1);
       badge.style.display = 'grid';
     } else badge.style.display = 'none';
   }
 
-  function draw() {
-    const pos = playing ? (beatNow() % cycle) - countIn : 0;
+  function draw(follow = true) {
+    const pos = playing ? posNow() : at;
     if (view === 'keys') drawKeys(pos);
-    else drawSheet(pos);
+    else drawSheet(pos, follow);
   }
+
+  // ---- moving through the exercise while stopped
+  let lastPpb = 40;
+  let ignoreScrollUntil = 0;
+  const report = () => { if (onPosition) onPosition(position()); };
+  function position() {
+    return { beat: at, bar: Math.min(p.nBars, Math.floor(at / p.barBeats + 1e-6) + 1), nBars: p.nBars, atStart: at < 1e-6 };
+  }
+  const lastOnset = Math.max(...p.events.map((e) => e.t));
+  function setPosition(beat, follow = true) {
+    // No further than the last note, so playing from here never runs off the end.
+    at = Math.max(0, Math.min(lastOnset, beat));
+    draw(follow);
+    report();
+  }
+  // Step to the next (or previous) note or chord and sound it.
+  function step(dir) {
+    if (playing) return;
+    const onsets = [...new Set(active().map((e) => e.t))].sort((a, b) => a - b);
+    const target = dir > 0 ? onsets.find((t) => t > at + 1e-6) : [...onsets].reverse().find((t) => t < at - 1e-6);
+    setPosition(target === undefined ? (dir > 0 ? at : 0) : target);
+    const now = audio().currentTime + 0.02;
+    for (const e of active()) {
+      if (Math.abs(e.t - at) < 1e-6) playNote(e.midi, now, Math.min(1.2, e.d * spb()), e.hand === 'L' ? 0.58 : 0.78, 0.25);
+    }
+  }
+  // Keys view: drag the falling notes up or down. Sheet view: scroll the music sideways.
+  let drag = null;
+  canvas.addEventListener('pointerdown', (ev) => {
+    if (playing) return;
+    drag = { y: ev.clientY, at };
+    canvas.setPointerCapture(ev.pointerId);
+  });
+  canvas.addEventListener('pointermove', (ev) => {
+    if (!drag || playing) return;
+    setPosition(drag.at + (ev.clientY - drag.y) / lastPpb);
+  });
+  const endDrag = () => { drag = null; };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+  scroller.addEventListener('scroll', () => {
+    if (playing || !sheet || performance.now() < ignoreScrollUntil) return;
+    const scale = sheet.scale || 1;
+    const lead = scroller.clientWidth * 0.3;
+    setPosition(beatAtX(sheet.anchors, (scroller.scrollLeft + lead) / scale), false);
+  }, { passive: true });
 
   // Watchdog: if the audio clock stops moving (the phone paused the sound), try to restart it, and
   // if that does not work, stop and say so instead of sitting frozen.
@@ -340,12 +404,12 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
   function frame() {
     if (!playing) return;
     if (!watchClock()) return;
-    if (once && beatNow() >= cycle) {
+    if (once && beatNow() >= cycleLen()) {
       stop();
       if (onEnd) onEnd();
       return;
     }
-    const pos = (beatNow() % cycle) - countIn;
+    const pos = posNow();
     track(pos);
     draw();
     raf = requestAnimationFrame(frame);
@@ -353,6 +417,9 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
 
   function play() {
     if (playing || destroyed) return;
+    // Start (and loop back to) the beginning of the bar you are in.
+    from = Math.floor(at / p.barBeats + 1e-6) * p.barBeats;
+    if (from >= p.totalBeats - 1e-6) from = 0;
     playing = true;
     resumeIfPaused();
     clockAt = -1;
@@ -377,7 +444,9 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     if (offNote) offNote();
     silence();
     marks = new Map();
+    at = from;
     draw();
+    report();
     if (onState) onState(false);
   }
 
@@ -402,6 +471,9 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     setMetronome: (v) => restart(() => { metronome = v; }),
     setFingers: (v) => { fingers = v; mount(); },
     setOnce: (v) => restart(() => { once = v; }),
+    step,
+    setPosition: (beat) => { if (!playing) setPosition(beat); },
+    position,
     scoring,
     hasBothHands: () => !!p.rh && !!p.lh,
     destroy: () => { stop(); destroyed = true; ro.disconnect(); stage.innerHTML = ''; },

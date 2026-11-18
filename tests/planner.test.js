@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   newState, buildSession, structureFor, allocate, applyRating, completeSession, applyLevel,
   lengthBounds, stats, weekStart, DAY, nextPiece, startTempo, FAST_FACTOR,
-  knowsExercise, suggestLevelUp, speedCheckStep,
+  knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan,
 } from '../js/planner.js';
 import { TRACK_ITEMS, ITEM_BY_ID } from '../js/content.js';
 
@@ -240,4 +240,30 @@ test('redoing the check at a lower level brings skipped exercises back', () => {
   applyLevel(s, 2);
   assert.equal(s.items['tq-g-ht'], undefined);
   assert.equal(s.items['tq-five-r'].st, 'skipped');
+});
+
+test('too hard for now: D major makes way for G major, which comes back even if it was below your level', () => {
+  const s = mk(10, 4);
+  applyLevel(s, 3);
+  assert.equal(buildSession(s, 10).slots[0].item.id, 'tq-d-ht');
+  const easier = setAside(s, 'tq-d-ht');
+  assert.equal(easier.id, 'tq-g-ht');
+  assert.equal(buildSession(s, 10).slots[0].item.id, 'tq-g-ht');
+  assert.equal(s.items['tq-d-ht'].bpm, Math.round(ITEM_BY_ID['tq-d-ht'].bpm * 0.6));
+  // After a couple of sessions it is back in line, once G major is learned.
+  applyRating(s, 'tq-g-ht', 'solid', 200, 0);
+  completeSession(s, { done: [{ role: 'warmup', item: ITEM_BY_ID['tq-g-ht'] }], minutes: 10 });
+  completeSession(s, { done: [{ role: 'warmup', item: ITEM_BY_ID['tq-g-ht'] }], minutes: 10 });
+  assert.equal(buildSession(s, 10).slots[0].item.id, 'tq-d-ht');
+});
+
+test('two Hard ratings in a row are flagged; the first step of a track has nothing easier', () => {
+  const s = mk(10, 4);
+  assert.equal(applyRating(s, 'fd-bass', 'hard', 60, 0).hardTwice, false);
+  assert.equal(applyRating(s, 'fd-bass', 'hard', 54, 0).hardTwice, true);
+  assert.equal(applyRating(s, 'fd-bass', 'ok', 54, 0).hardTwice, false);
+  assert.equal(easierThan(ITEM_BY_ID['fd-rh']), null);
+  assert.equal(easierThan(ITEM_BY_ID['fd-bass']).id, 'fd-turns');
+  assert.equal(easierThan(ITEM_BY_ID['pc-elise']).id, 'pc-minuet');
+  assert.equal(easierThan(ITEM_BY_ID['pc-ode']).id, 'cl-melody-alberti');
 });

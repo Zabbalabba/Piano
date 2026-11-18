@@ -127,6 +127,17 @@ export function cursorX(anchors, beat) {
   return anchors[anchors.length - 1].x;
 }
 
+// The beat at an x position: the inverse of cursorX, used when you scroll the music by hand.
+export function beatAtX(anchors, x) {
+  if (x <= anchors[0].x) return anchors[0].beat;
+  for (let i = 1; i < anchors.length; i++) {
+    const a = anchors[i - 1];
+    const b = anchors[i];
+    if (x <= b.x) return b.x - a.x < 1e-6 ? b.beat : a.beat + ((x - a.x) / (b.x - a.x)) * (b.beat - a.beat);
+  }
+  return anchors[anchors.length - 1].beat;
+}
+
 // A single note on a short stave, for the note-reading practice.
 export function renderNote(host, clef, name) {
   const F = VF();

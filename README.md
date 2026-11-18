@@ -12,7 +12,12 @@ and installs to a phone's home screen.
 - **Three ways to follow you.** Play along and rate yourself, microphone (approximate), or a MIDI
   keyboard (exact; needs Chrome or Edge on a laptop or Android device).
 - **Finger numbers** (1 thumb to 5 little finger) on the falling notes and in the sheet music.
-- **A slow demo** opens any exercise you have not yet played near its target tempo.
+- **A walkthrough** opens any exercise you have not yet played near its target tempo: step through it
+  note by note, drag through it, or play it slowly.
+- **Play from any bar**: while stopped, step or drag to a bar and practise from there.
+- **Too hard for now?** sets an exercise aside for a couple of sessions and puts the step before it in
+  its place. After two Hard ratings in a row, the app offers this itself.
+- **Every exercise explains itself**: what it is, what it does for you, and how to practise it.
 - **No tempo limit**: play as fast as you can, and progress follows.
 - **Skill check** at setup (note reading, ear, sight-reading passages and a speed check on real exercises), **ear training** and **note reading** as optional extras or on their own.
 - **Progress** centred on a weekly goal rather than a daily streak.
