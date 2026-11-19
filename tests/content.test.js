@@ -30,6 +30,22 @@ test('notes stay in a playable range and each hand fits a hand span', () => {
   }
 });
 
+test('key versions: every exercise in every key keeps its rhythm and stays playable', async () => {
+  const { KEY_VERSIONS } = await import('../js/content.js');
+  let n = 0;
+  for (const [id, versions] of Object.entries(KEY_VERSIONS)) {
+    const base = parseExercise(ITEM_BY_ID[id]);
+    for (const v of versions) {
+      n++;
+      const p = parseExercise(v);
+      assert.equal(p.nBars, base.nBars, v.id);
+      assert.equal(p.events.length, base.events.length, v.id);
+      assert.ok(v.t.includes(' · in '), v.id);
+    }
+  }
+  assert.equal(n, 72 * 3);
+});
+
 test('every genre has five exercises ordered by level and three pieces', () => {
   assert.ok(GENRES.length <= 15);
   for (const g of GENRES) {

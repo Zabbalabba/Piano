@@ -1,6 +1,6 @@
 // Session planning and progress rules. Pure functions over the saved state, no DOM.
 
-import { TRACK_ITEMS, PIECE_ITEMS, ITEM_BY_ID, GENRES, PREP } from './content.js';
+import { TRACK_ITEMS, PIECE_ITEMS, ITEM_BY_ID, GENRES, PREP, KEY_VERSIONS } from './content.js';
 import { parseExercise, pulseOf, barBeatsOf } from './music.js';
 
 export const DAY = 86400000;
@@ -41,11 +41,38 @@ export function lengthBounds(target) {
 const prog = (state, id) => state.items[id] || { st: 'new', solid: 0, reps: 0 };
 const isDone = (state, id) => ['mastered', 'skipped'].includes(prog(state, id).st);
 
-// Exercises still to learn in a track, in order. One set aside as "too hard for now" waits until a
-// couple of sessions have passed, unless nothing else is left.
+// ---- new keys
+// A version in a new key opens once the one before it (the original, or the previous key) is
+// mastered, and waits a couple of sessions so it does not follow straight on from it.
+export const KEY_WAIT_SESSIONS = 2;
+const before = (v) => (v.version === 1 ? v.base : `${v.base}~${v.version - 1}`);
+
+export function openVersions(state, track) {
+  const out = [];
+  for (const item of TRACK_ITEMS[track] || []) {
+    for (const v of KEY_VERSIONS[item.id] || []) {
+      const prev = state.items[before(v)];
+      if (!prev || prev.st !== 'mastered') break;
+      out.push({ v, since: prev.masteredAt || 0 });
+    }
+  }
+  return out.sort((a, b) => a.since - b.since);
+}
+
+// Versions of one exercise to list in the library: those opened or already practised.
+export function versionsShown(state, baseId) {
+  return (KEY_VERSIONS[baseId] || []).filter((v) => state.items[v.id] || prog(state, before(v)).st === 'mastered');
+}
+
+// Exercises still to learn in a track, in order: new exercises first, then versions in new keys.
+// One set aside as "too hard for now", or a key version that has just opened, waits a couple of
+// sessions, unless nothing else is left.
 export function remaining(state, track) {
-  const left = TRACK_ITEMS[track].filter((x) => !isDone(state, x.id));
-  const ready = left.filter((x) => !(prog(state, x.id).later > state.sessions));
+  const originals = TRACK_ITEMS[track].filter((x) => !isDone(state, x.id));
+  const versions = openVersions(state, track).filter(({ v }) => !isDone(state, v.id));
+  const left = [...originals, ...versions.map(({ v }) => v)];
+  const waiting = new Set(versions.filter(({ since }) => state.sessions < since + KEY_WAIT_SESSIONS).map(({ v }) => v.id));
+  const ready = left.filter((x) => !(prog(state, x.id).later > state.sessions) && !waiting.has(x.id));
   return ready.length ? ready : left;
 }
 
@@ -54,6 +81,7 @@ export const SET_ASIDE_SESSIONS = 2;
 
 // The exercise to build up with first, or null when this is already the first step.
 export function easierThan(item) {
+  if (item.base) return ITEM_BY_ID[item.base];
   if (PREP[item.id]) return ITEM_BY_ID[PREP[item.id]];
   if (item.kind === 'piece') {
     const pieces = PIECE_ITEMS[item.track];
@@ -290,6 +318,9 @@ export function targetOf(state, item) {
 export function startTempo(state, item) {
   const p = state.items[item.id];
   if (p && p.bpm) return p.bpm;
+  // A new key of a pattern you know: start a little below your tempo on the original.
+  const base = item.base && state.items[item.base];
+  if (base && base.bpm) return Math.round(base.bpm * 0.85);
   let factor = (state.pace || 0) >= PACE_RUN ? 1 : 0.7;
   if (state.speed) factor = Math.max(factor, Math.min(1.5, state.speed * 0.85));
   return Math.round(targetOf(state, item) * factor);
@@ -337,6 +368,7 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
       // Solid and clearly faster than planned: no need to prove it twice, and the review can wait longer.
       if (p.solid >= 2 || fast) {
         p.st = 'mastered';
+        p.masteredAt = state.sessions;
         p.ivl = fast ? FAST_REVIEW_DAYS : 3;
         p.due = now + p.ivl * DAY;
         becameMastered = true;

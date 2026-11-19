@@ -4,8 +4,9 @@ import {
   newState, buildSession, structureFor, allocate, applyRating, completeSession, applyLevel,
   lengthBounds, stats, weekStart, DAY, nextPiece, startTempo, FAST_FACTOR,
   knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, targetOf, maxTarget,
+  remaining, versionsShown,
 } from '../js/planner.js';
-import { TRACK_ITEMS, ITEM_BY_ID } from '../js/content.js';
+import { TRACK_ITEMS, ITEM_BY_ID, KEY_VERSIONS } from '../js/content.js';
 
 const mk = (minutes, perWeek, genres = ['blues', 'pop']) => {
   const s = newState(0);
@@ -292,4 +293,33 @@ test('the target stops at about 170 notes a minute, and genre exercises keep the
   const jz = ITEM_BY_ID['jz-swing'];
   applyRating(s, jz.id, 'solid', 140, 0);
   assert.equal(targetOf(s, jz), jz.bpm);
+});
+
+test('a mastered exercise comes back in new keys, after new exercises and a couple of sessions', () => {
+  const s = mk(10, 4, ['blues']);
+  const form = ITEM_BY_ID['bl-form'];
+  applyRating(s, form.id, 'solid', form.bpm * 1.3, 0); // mastered in one go
+  const ids = (l) => l.map((x) => x.id);
+  assert.ok(!ids(remaining(s, 'blues')).includes('bl-form~1')); // waits two sessions
+  s.sessions += 2;
+  const left = ids(remaining(s, 'blues'));
+  assert.equal(left[left.length - 1], 'bl-form~1'); // new exercises come first
+  assert.equal(ITEM_BY_ID['bl-form~1'].keyName, 'F');
+  assert.equal(versionsShown(s, 'bl-form').length, 1);
+  // starts at 85% of your tempo on the original, and its easier step is the original
+  assert.equal(startTempo(s, ITEM_BY_ID['bl-form~1']), Math.round(form.bpm * 1.3 * 0.85));
+  assert.equal(easierThan(ITEM_BY_ID['bl-form~1']).id, 'bl-form');
+  // the next key opens only once this one is mastered
+  assert.ok(!ids(remaining(s, 'blues')).includes('bl-form~2'));
+  applyRating(s, 'bl-form~1', 'solid', 500, 0);
+  s.sessions += 2;
+  assert.ok(ids(remaining(s, 'blues')).includes('bl-form~2'));
+});
+
+test('exercises below your level do not open new keys; scales and pieces have none', () => {
+  const s = mk(10, 4, ['blues']);
+  applyLevel(s, 3);
+  assert.equal(versionsShown(s, 'bl-form').length, 0);
+  assert.equal(KEY_VERSIONS['tq-g-ht'], undefined);
+  assert.equal(KEY_VERSIONS['pc-ode'], undefined);
 });

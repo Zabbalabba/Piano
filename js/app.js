@@ -4,7 +4,7 @@ import { GENRES, TRACK_ITEMS, PIECE_ITEMS, TRACK_INFO, ITEM_BY_ID, ASSESS_PASSAG
 import { parseExercise, noteToMidi } from './music.js';
 import {
   newState, buildSession, structureFor, lengthBounds, applyRating, completeSession, applyLevel,
-  startTempo, nextPiece, FAST_FACTOR, targetOf, knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
+  startTempo, nextPiece, FAST_FACTOR, targetOf, versionsShown, knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
 } from './planner.js';
 import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from './audio.js';
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
@@ -1129,9 +1129,11 @@ function statusOf(id) {
 function library(focus) {
   const mine = S.profile.genres;
   const others = GENRES.map((g) => g.id).filter((g) => !mine.includes(g));
-  const itemRow = (it) => {
-    const [cls, text] = statusOf(it.id);
-    return `<button class="item" data-act="open" data-id="${it.id}"><i class="st ${cls}"></i><span><b>${esc(it.t)}</b><small>${text} · ${LEVELS[it.lv]}</small></span></button>`;
+  const itemRow = (it, version = false) => {
+    let [cls, text] = statusOf(it.id);
+    if (version && cls === 'new') text = 'Opens in a session soon';
+    const title = version ? `in ${it.keyName}` : it.t;
+    return `<button class="item${version ? ' version' : ''}" data-act="open" data-id="${it.id}"><i class="st ${cls}"></i><span><b>${esc(title)}</b><small>${text}${version ? '' : ` · ${LEVELS[it.lv]}`}</small></span></button>`;
   };
   const section = (track, open) => {
     const info = TRACK_INFO[track];
@@ -1139,7 +1141,7 @@ function library(focus) {
     const pieces = PIECE_ITEMS[track];
     return `<details class="track" ${open ? 'open' : ''}><summary><span><b>${esc(info.name)}</b><small>${pr.done} of ${pr.total} done</small></span>
       <span class="bar"><i style="width:${(100 * pr.done) / pr.total}%"></i></span></summary>
-      ${focus === 'pieces' ? '' : TRACK_ITEMS[track].map(itemRow).join('')}
+      ${focus === 'pieces' ? '' : TRACK_ITEMS[track].map((it) => itemRow(it) + versionsShown(S, it.id).map((v) => itemRow(v, true)).join('')).join('')}
       ${pieces ? `<h3>Pieces</h3>${pieces.map(itemRow).join('')}` : ''}</details>`;
   };
   const core = focus === 'pieces' ? '' : section('technique', false) + section('foundations', false);

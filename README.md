@@ -25,6 +25,10 @@ and installs to a phone's home screen.
   with under 60% of answers right. Every note or interval counts equally in the score, and ones you
   get wrong (or, in note reading, answer much more slowly than usual) come up more often.
 - **No tempo limit**: play as fast as you can, and progress follows.
+- **New keys**: once you master a genre or foundation exercise, it returns (after a couple of sessions,
+  and after new exercises) in a new key that suits the genre, up to three keys each, e.g. jazz in F,
+  B♭ and G. Notes, key signature and fingering are worked out by the app; each key version starts at
+  85% of your tempo on the original. Scales have their own keys; pieces stay in theirs.
 - **Rising targets for technique**: each Solid rating at or near the target raises it (your tempo + 5%,
   or the old target + 10%, whichever is higher), up to about 170 notes a minute. Above about 120 the
   click moves to every second beat. Genre exercises and pieces keep their musical tempo.

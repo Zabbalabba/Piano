@@ -250,3 +250,5 @@ button:disabled { opacity: 0.4; cursor: default; }
 .center-text { text-align: center; }
 .quiz-notes { margin: 8px 0 12px; text-align: left; }
 .levelup.down { border-color: var(--accent); }
+.item.version { padding-left: 26px; min-height: 44px; }
+.item.version b { font-weight: 600; }

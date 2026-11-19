@@ -7,7 +7,7 @@
 // focus (what it trains and why it is here) and tip (how to practise it).
 // Pieces additionally carry src (where the music comes from) and perf (performance tempo).
 
-import { pat, seq, rep, bars, scaleNotes } from './music.js';
+import { pat, seq, rep, bars, scaleNotes, transposeNote, noteToMidi, isBlackKey } from './music.js';
 
 export const GENRES = [
   { id: 'classical', pedal: true, name: 'Classical', blurb: 'Clear melodies, even fingers, Alberti bass.' },
@@ -1135,7 +1135,99 @@ for (const g of GENRES) {
   }));
 }
 
-export const ALL_ITEMS = [...Object.values(TRACK_ITEMS).flat(), ...Object.values(PIECE_ITEMS).flat()];
+// ---------------------------------------------------------------- the same exercises in new keys
+//
+// Once you master a genre or foundation exercise, it comes back later in a new key: the same skill
+// with new hand positions, black keys and a new key signature. Keys follow what is common in each
+// genre. Scales and arpeggios already have their own keys in the technique track, and pieces stay
+// in the key they were written in.
+const UP4 = [5, 3];
+const UP5 = [7, 4];
+const UP2 = [2, 1];
+const DOWN2 = [-2, -1];
+const KEY_PLAN = {
+  foundations: [UP5, UP4, UP2],
+  classical: [UP5, UP4, UP2],
+  pop: [UP5, UP4, UP2],
+  folk: [UP5, UP4, UP2],
+  rock: [UP5, UP4, UP2],
+  jazz: [UP4, DOWN2, UP5],
+  blues: [UP4, UP5, DOWN2],
+  latin: [UP4, UP5, UP2],
+  gospel: [UP4, DOWN2, UP5],
+  rnb: [UP4, DOWN2, UP5],
+  ragtime: [UP4, DOWN2, UP5],
+  funk: [UP2, UP4, UP5],
+  country: [UP4, UP5, UP2],
+  film: [UP4, UP5, DOWN2],
+};
+const NOTE_RE = /([A-G](?:#{1,2}|b{1,2})?-?\d)(@[1-5])?/g;
+const noteNames = (str) => (str ? [...str.matchAll(NOTE_RE)].map((m) => m[1]) : []);
+const shiftVoice = (str, steps, semis) => (str ? str.replace(NOTE_RE, (_, n, f) => transposeNote(n, steps, semis) + (f || '')) : str);
+const pitchName = (note) => note.replace(/-?\d$/, '').replace('#', '♯').replace(/b$/, '♭').replace('bb', '𝄫');
+
+// The home key of exercises that are in minor (all others are in the major key of their key
+// signature), so a version can be named "in D minor" rather than after its key signature.
+const MINOR_HOME = {
+  'fm-fifths': 'A', 'fm-arp': 'A', 'fm-ostinato': 'A', 'fm-melody': 'A', 'fm-332': 'A',
+  'fu-one': 'D', 'fu-offbeat': 'D', 'fu-riff': 'D', 'fu-octave': 'D', 'fu-both': 'D',
+  'rk-power': 'A', 'rk-eighths': 'A', 'rk-riff': 'A', 'rk-stabs': 'A',
+  'lt-habanera': 'D', 'rb-melody': 'A', 'rb-groove': 'A', 'fk-drone': 'D', 'fk-scarb': 'D',
+};
+function keyLabel(item, steps, semis) {
+  const sig = transposeNote((item.key || 'C') + '4', steps, semis).replace(/-?\d$/, '');
+  const minor = MINOR_HOME[item.id];
+  if (minor) return { sig, name: `${pitchName(transposeNote(minor + '4', steps, semis))} minor` };
+  return { sig, name: pitchName(sig) };
+}
+
+// How far a hand's notes stray from its staff (bass G2-A3, treble E4-F5), in semitones.
+const offStaff = (midis, hand) => {
+  const [lo, hi] = hand === 'L' ? [43, 57] : [64, 77];
+  return midis.reduce((a, m) => a + Math.max(0, lo - m, m - hi), 0);
+};
+
+function keyVersions(item) {
+  const plan = KEY_PLAN[item.track];
+  if (!plan) return [];
+  return plan.map(([semis, steps], i) => {
+    // Up or down: each hand takes the octave that keeps it closest to its own staff, within a
+    // normal keyboard range.
+    const options = semis > 0 ? [[semis, steps], [semis - 12, steps - 7]] : [[semis, steps], [semis + 12, steps + 7]];
+    const voice = (str, hand) => {
+      if (!str) return str;
+      const notes = noteNames(str).map(noteToMidi);
+      const fits = ([d]) => notes.every((m) => m + d >= 36 && m + d <= 96);
+      const score = ([d]) => offStaff(notes.map((m) => m + d), hand) + 0.1 * Math.abs(d);
+      const [d, st] = options.filter(fits).sort((x, y) => score(x) - score(y))[0] || options[0];
+      let out = shiftVoice(str, st, d);
+      // A written fingering that would put the thumb on a black key is left to the fingering engine.
+      if ([...out.matchAll(NOTE_RE)].some((m) => m[2] === '@1' && isBlackKey(noteToMidi(m[1])))) out = out.replace(/@[1-5]/g, '');
+      return out;
+    };
+    const { sig, name } = keyLabel(item, steps, semis);
+    return {
+      ...item,
+      id: `${item.id}~${i + 1}`,
+      base: item.id,
+      version: i + 1,
+      keyName: name,
+      t: `${item.t} · in ${name}`,
+      key: sig,
+      rh: voice(item.rh, 'R'),
+      lh: voice(item.lh, 'L'),
+    };
+  });
+}
+
+// The versions of each exercise in other keys, in the order they come.
+export const KEY_VERSIONS = {};
+for (const track of Object.keys(KEY_PLAN)) {
+  for (const item of TRACK_ITEMS[track] || []) KEY_VERSIONS[item.id] = keyVersions(item);
+}
+const VERSION_ITEMS = Object.values(KEY_VERSIONS).flat();
+
+export const ALL_ITEMS = [...Object.values(TRACK_ITEMS).flat(), ...Object.values(PIECE_ITEMS).flat(), ...VERSION_ITEMS];
 export const ITEM_BY_ID = Object.fromEntries(ALL_ITEMS.map((x) => [x.id, x]));
 
 // The exercise to build up with when one is too hard for now. Without an entry, it is the one
