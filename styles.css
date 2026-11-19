@@ -248,3 +248,4 @@ button:disabled { opacity: 0.4; cursor: default; }
 .keys-canvas { touch-action: none; cursor: grab; }
 @media (orientation: landscape) and (max-height: 500px) { .ex-head .gain { display: none; } }
 .center-text { text-align: center; }
+.quiz-notes { margin: 8px 0 12px; text-align: left; }

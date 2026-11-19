@@ -10,7 +10,10 @@ import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from '
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
 import { createPlayer } from './player.js';
 import { renderSheet, renderNote } from './sheet.js';
-import { readingQuestion, earQuestion, adjustLevel, levelStatus, READ_LEVELS, EAR_LEVELS, LEVEL_WINDOW } from './quiz.js';
+import {
+  readingQuestion, earQuestion, adjustLevel, levelStatus, READ_LEVELS, EAR_LEVELS, LEVEL_WINDOW,
+  recordAnswer, isSlow, keyName, progressNotes,
+} from './quiz.js';
 
 const KEY = 'piano.v1';
 const $app = document.getElementById('app');
@@ -30,7 +33,11 @@ function load() {
         ...base, ...saved,
         profile: { ...base.profile, ...saved.profile, level: { ...base.profile.level, ...(saved.profile || {}).level } },
         settings: { ...base.settings, ...saved.settings, modules: { ...base.settings.modules, ...(saved.settings || {}).modules } },
-        quiz: { ...base.quiz, ...saved.quiz },
+        quiz: {
+          ...base.quiz, ...saved.quiz,
+          stats: { ...base.quiz.stats, ...((saved.quiz || {}).stats || {}) },
+          times: { ...base.quiz.times, ...((saved.quiz || {}).times || {}) },
+        },
       };
     }
   } catch { /* start fresh */ }
@@ -292,7 +299,7 @@ function skillCheck(done) {
         S.speed = result.speed || 0;
         S.fastRun = 0;
         S.profile.level.ear = result.ear;
-        S.quiz = { ear: [], read: [] };
+        S.quiz = { ...S.quiz, ear: [], read: [] };
         applyLevel(S, result.play);
         save();
         done();
@@ -433,6 +440,7 @@ function speedCheck(fromLevel, done) {
 // One quiz question (reading or ear). Shared by the skill check and the practice modules.
 function askQuestion({ kind, q, header, skip, onSkip, onAnswer, progressText = '' }) {
   let answered = false;
+  const shownAt = performance.now();
   let stop = null;
   const play = async () => {
     await unlock();
@@ -460,7 +468,8 @@ function askQuestion({ kind, q, header, skip, onSkip, onAnswer, progressText = '
         await unlock();
         playNote(noteToMidi(q.note), audio().currentTime + 0.02, 0.8);
       }
-      setTimeout(() => onAnswer(right), right ? 650 : 1500);
+      const ms = performance.now() - shownAt;
+      setTimeout(() => onAnswer(right, ms), right ? 650 : 1500);
     },
   }, () => { if (stop) stop(); });
   if (kind === 'read') {
@@ -514,11 +523,18 @@ function runQuiz(kind, done) {
     let right = 0;
     let last = null;
     let moved = 0;
+    const asked = [];
     const results = (minutes) => {
+      const notes = progressNotes(S.quiz.stats[key], asked);
+      const list = (keys) => keys.map(keyName).map(esc).join(' · ');
+      const progressHtml = notes.stronger.length || notes.tricky.length ? `<div class="card rows quiz-notes">
+        ${notes.stronger.length ? `<div class="row"><span><b>Getting stronger</b><small>${list(notes.stronger)}</small></span></div>` : ''}
+        ${notes.tricky.length ? `<div class="row"><span><b>Still tricky</b><small>${list(notes.tricky)}. These come up a little more often.</small></span></div>` : ''}
+      </div>` : '';
       const st = levelStatus(S.quiz[key]);
       const lvl = S.profile.level[key];
       const ready = adjustLevel(lvl, S.quiz[key]) > lvl;
-      const pct = `${st.right} of your last ${st.answers} right (${Math.round(st.share * 100)}%)`;
+      const pct = `${st.right} of your last ${st.answers} right, ${Math.round(st.share * 100)}% with every ${kind === 'read' ? 'note' : 'question type'} counted equally`;
       const where = moved > 0 ? `You moved up to level ${lvl}. Your count starts fresh at this level.`
         : moved < 0 ? `You moved back to level ${lvl} to make it solid. Your count starts fresh here.`
         : moved === 'declined' ? 'Staying at this level. Your count starts fresh, so the next offer is based on new answers.'
@@ -526,6 +542,7 @@ function runQuiz(kind, done) {
         : `${pct}. 85% or more over ${LEVEL_WINDOW} answers is ready to move up; under 60% moves you back.`;
       show(`<main class="page center"><h1>${right} of ${total}</h1>
         <p class="lead">${title} · level ${lvl} · ${levelName()}</p>
+        ${progressHtml}
         ${ready && !moved ? `<div class="card levelup"><p><b>Ready for level ${lvl + 1}?</b> ${pct}. Next: ${(kind === 'read' ? READ_LEVELS : EAR_LEVELS)[lvl + 1]}. If it felt like luck, stay a while longer.</p>
           <div class="two-btns"><button class="btn" data-act="notYet">Not yet</button><button class="btn primary" data-act="moveUp">Move up</button></div></div>`
           : `<div class="card"><p class="muted">${where}</p></div>`}
@@ -541,15 +558,21 @@ function runQuiz(kind, done) {
         return results(Math.min(total * 0.5, (Date.now() - started) / 60000));
       }
       const level = S.profile.level[key];
-      const q = kind === 'read' ? readingQuestion(level, last) : earQuestion(level);
+      const stats = S.quiz.stats[key];
+      const q = kind === 'read' ? readingQuestion(level, last, Math.random, stats) : earQuestion(level, Math.random, stats, last);
       last = q;
       askQuestion({
         kind, q,
         header: `<div class="topbar"><button class="icon-btn" data-act="quit" aria-label="Close">✕</button><b>${title}</b><span>${i + 1} / ${total}</span></div>`,
-        onAnswer: (ok) => {
+        onAnswer: (ok, ms) => {
           i += 1;
           if (ok) right += 1;
-          S.quiz[key] = [...S.quiz[key], ok ? 1 : 0].slice(-LEVEL_WINDOW);
+          // A right but much slower than usual answer counts as half a struggle (note reading only).
+          const slow = kind === 'read' && ok && isSlow(ms, S.quiz.times.read);
+          if (kind === 'read' && ok) S.quiz.times.read = [...S.quiz.times.read, Math.round(ms)].slice(-20);
+          S.quiz.stats[key] = recordAnswer(S.quiz.stats[key], q.key, ok ? (slow ? 0.5 : 1) : 0);
+          asked.push(q.key);
+          S.quiz[key] = [...S.quiz[key], { k: q.key, s: ok ? 1 : 0 }].slice(-LEVEL_WINDOW);
           // Moving back happens straight away; moving up is offered at the end of the round.
           const next = adjustLevel(level, S.quiz[key]);
           if (next < level) {

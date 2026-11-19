@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adjustLevel, levelStatus, readingQuestion, earQuestion } from '../js/quiz.js';
+import {
+  adjustLevel, levelStatus, readingQuestion, earQuestion, readingPool, recordAnswer, isSlow, keyName,
+  progressNotes, balancedShare, struggle,
+} from '../js/quiz.js';
 
 const log = (right, wrong) => [...Array(right).fill(1), ...Array(wrong).fill(0)];
 
@@ -40,4 +43,48 @@ test('questions always have their answer among the choices', () => {
       assert.ok(e.choices.includes(e.answer));
     }
   }
+});
+
+test('questions you get wrong come up more often, but at most about half the round targets them', () => {
+  let stats = {};
+  for (let i = 0; i < 5; i++) stats = recordAnswer(stats, 'treble:F4', 0);
+  const pool = readingPool(1);
+  let f = 0;
+  const N = 20000;
+  let seed = 3;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < N; i++) if (readingQuestion(1, null, rnd, stats).key === 'treble:F4') f++;
+  const even = 1 / pool.length;
+  // Even share is 1/5 of the pool; with the weak spot weighted 4x on half the picks: 0.5/5 + 0.5*4/8 = 0.35
+  assert.ok(f / N > even * 1.5 && f / N < 0.4, `share ${f / N}`);
+});
+
+test('a slow right answer counts as half a struggle', () => {
+  assert.equal(isSlow(5000, [1000, 1100, 900, 1200, 1000]), true);
+  assert.equal(isSlow(1500, [1000, 1100, 900, 1200, 1000]), false);
+  assert.equal(isSlow(9000, [1000]), false); // not enough answers yet to know what is usual
+  assert.equal(struggle([1, 0.5, 0]), 0.5);
+});
+
+test('history keeps the last five answers per question', () => {
+  let s = {};
+  for (let i = 0; i < 8; i++) s = recordAnswer(s, 'int:7', i % 2);
+  assert.equal(s['int:7'].length, 5);
+});
+
+test('level score weighs every question type equally', () => {
+  // F asked 10 times (5 right), E asked twice (both right): raw 7/12, balanced (0.5 + 1) / 2
+  const log = [...Array(5).fill({ k: 'F', s: 1 }), ...Array(5).fill({ k: 'F', s: 0 }), { k: 'E', s: 1 }, { k: 'E', s: 1 }];
+  assert.equal(balancedShare(log), 0.75);
+  assert.equal(balancedShare([1, 1, 0, 1]), 0.75); // old saved logs still work
+});
+
+test('readable names and progress notes', () => {
+  assert.equal(keyName('treble:F5'), 'F, treble clef, top line');
+  assert.equal(keyName('treble:E4'), 'E, treble clef, bottom line');
+  assert.equal(keyName('treble:C4'), 'C, treble clef, below the staff');
+  assert.equal(keyName('bass:F3'), 'F, bass clef, 4th line');
+  assert.equal(keyName('int:7'), 'Fifth');
+  const stats = { 'treble:F4': [0, 0, 1, 1], 'treble:B4': [0, 1, 0], 'treble:C4': [1, 1] };
+  assert.deepEqual(progressNotes(stats, ['treble:F4', 'treble:B4', 'treble:C4']), { stronger: ['treble:F4'], tricky: ['treble:B4'] });
 });

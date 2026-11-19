@@ -427,7 +427,7 @@ export function newState(now = Date.now()) {
     speed: 0,
     sessions: 0,
     history: [],
-    quiz: { ear: [], read: [] },
+    quiz: { ear: [], read: [], stats: { ear: {}, read: {} }, times: { read: [] } },
   };
 }
 

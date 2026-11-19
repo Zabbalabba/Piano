@@ -21,6 +21,8 @@ and installs to a phone's home screen.
 - **Ear training and note reading**: choose the number of questions (steps of 5). Levels are reviewed
   over your last 40 answers at that level (85% right is ready to move up, under 60% moves back), or
   from 20 answers on at 90% / 50%. Moving up is offered, and you can decline.
+  Notes and intervals you get wrong (or, in note reading, answer much more slowly than usual) come
+  up more often, and the level score counts every note or interval equally.
 - **No tempo limit**: play as fast as you can, and progress follows.
 - **Skill check** at setup (note reading, ear, sight-reading passages and a speed check on real exercises), **ear training** and **note reading** as optional extras or on their own.
 - **Progress** centred on a weekly goal rather than a daily streak.
