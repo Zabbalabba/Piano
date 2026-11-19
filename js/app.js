@@ -1155,6 +1155,7 @@ function settings() {
       <label class="btn">Import backup<input type="file" id="imp" accept="application/json,.json" hidden></label>
       <button class="btn danger" data-act="reset">Erase everything</button>
     </div>
+    <p class="note credits" id="version">App version: checking…</p>
     <p class="note credits">Piano sound: Salamander Grand Piano by Alexander Holm, CC BY 3.0. Notation drawn with VexFlow.</p>
   </main>${nav('settings')}`, {
     go,
@@ -1192,6 +1193,7 @@ function settings() {
       home();
     },
   });
+  showVersion();
   document.getElementById('imp').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -1216,6 +1218,23 @@ document.addEventListener('visibilitychange', () => {
   else applyTheme();
 });
 applyTheme();
+// The version shown in Settings, as reported by the offline worker.
+function showVersion() {
+  const el = document.getElementById('version');
+  if (!el) return;
+  const sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+  if (!sw) { el.textContent = 'App version: not installed for offline use yet (open the app once more).'; return; }
+  const onMsg = (e) => {
+    if (e.data && e.data.version) {
+      const v = document.getElementById('version');
+      if (v) v.textContent = `App version: ${e.data.version}`;
+      navigator.serviceWorker.removeEventListener('message', onMsg);
+    }
+  };
+  navigator.serviceWorker.addEventListener('message', onMsg);
+  sw.postMessage('version');
+}
+
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }

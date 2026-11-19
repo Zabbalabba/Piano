@@ -1,5 +1,5 @@
 // Offline support: try the network first so updates arrive, fall back to the cache.
-const CACHE = 'piano-v11';
+const CACHE = 'piano-v12';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'vendor/vexflow.js',
   'js/app.js', 'js/audio.js', 'js/content.js', 'js/detect.js', 'js/fingering.js', 'js/input.js', 'js/music.js',
@@ -18,10 +18,21 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+const fresh = (req) => (req.mode === 'navigate'
+  ? new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' })
+  : new Request(req, { cache: 'no-cache' }));
+
+// The page asks which version it is running.
+self.addEventListener('message', (e) => {
+  if (e.data === 'version' && e.source) e.source.postMessage({ version: CACHE.replace('piano-', '') });
+});
+
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // Always check with the server for a newer file (instead of reusing the phone's copy for up to
+    // ten minutes), so a new version shows up the next time the app is opened.
+    fetch(fresh(e.request))
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
