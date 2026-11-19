@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   newState, buildSession, structureFor, allocate, applyRating, completeSession, applyLevel,
   lengthBounds, stats, weekStart, DAY, nextPiece, startTempo, FAST_FACTOR,
-  knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan,
+  knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, targetOf, maxTarget,
 } from '../js/planner.js';
 import { TRACK_ITEMS, ITEM_BY_ID } from '../js/content.js';
 
@@ -266,4 +266,30 @@ test('two Hard ratings in a row are flagged; the first step of a track has nothi
   assert.equal(easierThan(ITEM_BY_ID['fd-bass']).id, 'fd-turns');
   assert.equal(easierThan(ITEM_BY_ID['pc-elise']).id, 'pc-minuet');
   assert.equal(easierThan(ITEM_BY_ID['pc-ode']).id, 'cl-melody-alberti');
+});
+
+test('technique targets rise with Solid ratings: your tempo + 5% or the old target + 10%', () => {
+  const s = mk(10, 4);
+  const g = ITEM_BY_ID['tq-g-ht']; // target 76
+  const r = applyRating(s, g.id, 'solid', 95, 0); // well above: mastered, and the target follows you
+  assert.equal(r.becameMastered, true);
+  assert.equal(targetOf(s, g), 100);
+  applyRating(s, g.id, 'solid', 100, 0); // review at the new target: + 10%
+  assert.equal(targetOf(s, g), 110);
+  applyRating(s, g.id, 'ok', 110, 0); // Getting there changes nothing
+  assert.equal(targetOf(s, g), 110);
+  applyRating(s, g.id, 'solid', 80, 0); // Solid but well under target: no rise
+  assert.equal(targetOf(s, g), 110);
+});
+
+test('the target stops at about 170 notes a minute, and genre exercises keep theirs', () => {
+  const s = mk(10, 4);
+  const c = ITEM_BY_ID['tq-c-ht'];
+  for (let i = 0; i < 20; i++) applyRating(s, c.id, 'solid', targetOf(s, c), 0);
+  assert.equal(targetOf(s, c), 170); // quarter notes: 170 notes a minute
+  const e = ITEM_BY_ID['tq-c-eighths'];
+  assert.equal(maxTarget(e), 85); // eighth notes: 170 notes a minute is 85 beats
+  const jz = ITEM_BY_ID['jz-swing'];
+  applyRating(s, jz.id, 'solid', 140, 0);
+  assert.equal(targetOf(s, jz), jz.bpm);
 });

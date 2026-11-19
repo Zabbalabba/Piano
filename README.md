@@ -25,6 +25,9 @@ and installs to a phone's home screen.
   with under 60% of answers right. Every note or interval counts equally in the score, and ones you
   get wrong (or, in note reading, answer much more slowly than usual) come up more often.
 - **No tempo limit**: play as fast as you can, and progress follows.
+- **Rising targets for technique**: each Solid rating at or near the target raises it (your tempo + 5%,
+  or the old target + 10%, whichever is higher), up to about 170 notes a minute. Above about 120 the
+  click moves to every second beat. Genre exercises and pieces keep their musical tempo.
 - **Skill check** at setup (note reading, ear, sight-reading passages and a speed check on real exercises), **ear training** and **note reading** as optional extras or on their own.
 - **Progress** centred on a weekly goal rather than a daily streak.
 - **Evening mode**: a dim, warm theme with dark sheet music, switchable by hand or automatically at night.

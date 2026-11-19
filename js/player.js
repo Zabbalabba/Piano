@@ -24,6 +24,14 @@ const css = (name) => getComputedStyle(document.documentElement).getPropertyValu
 export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true, metronome = true, fingers = true, once = false, onPass, onState, onEnd, onPosition, onStall = defaultStall }) {
   const p = parseExercise(item);
   const countIn = p.barBeats;
+  // At fast tempos the click moves to every second beat (or once a bar), so it stays a pulse you
+  // can follow instead of a buzz: above about 120 clicks a minute.
+  const pulse = () => {
+    let q = p.pulse;
+    while (bpm / q > 120 && p.barBeats % (q * 2) < 1e-9) q *= 2;
+    if (bpm / q > 120 && q < p.barBeats) q = p.barBeats;
+    return q;
+  };
   // Where you are in the exercise while stopped (in beats), and where playing starts and loops back
   // to: the start of the bar you are in. Drag the notes or step with the arrows to move.
   let at = 0;
@@ -119,7 +127,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     for (let c = c0; c <= c1; c++) {
       if (once && c > 0) break;
       const base = c * cycle;
-      for (let b = 0; b < cycle - 1e-6; b += p.pulse) {
+      for (let b = 0; b < cycle - 1e-6; b += pulse()) {
         const abs = base + b;
         if (abs < scheduled || abs >= horizon) continue;
         const inCount = b < countIn - 1e-6;
@@ -298,7 +306,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     g.fillRect(0, lineY - 2, W, 2);
 
     if (playing && pos < from) {
-      const n = Math.floor((countIn + pos - from) / p.pulse) + 1;
+      const n = Math.floor((countIn + pos - from) / pulse()) + 1;
       g.fillStyle = css('--text');
       g.globalAlpha = 0.85;
       g.font = '700 64px system-ui, sans-serif';
@@ -321,7 +329,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     cursor.style.transform = `translateX(${x - scroller.scrollLeft}px)`;
     cursor.style.opacity = playing ? 1 : 0.8;
     if (playing && pos < from) {
-      badge.textContent = String(Math.floor((countIn + pos - from) / p.pulse) + 1);
+      badge.textContent = String(Math.floor((countIn + pos - from) / pulse()) + 1);
       badge.style.display = 'grid';
     } else badge.style.display = 'none';
   }

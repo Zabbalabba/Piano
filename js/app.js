@@ -4,7 +4,7 @@ import { GENRES, TRACK_ITEMS, PIECE_ITEMS, TRACK_INFO, ITEM_BY_ID, ASSESS_PASSAG
 import { parseExercise, noteToMidi } from './music.js';
 import {
   newState, buildSession, structureFor, lengthBounds, applyRating, completeSession, applyLevel,
-  startTempo, nextPiece, FAST_FACTOR, knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
+  startTempo, nextPiece, FAST_FACTOR, targetOf, knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
 } from './planner.js';
 import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from './audio.js';
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
@@ -862,8 +862,9 @@ function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
   let rating = false;
   // A slow demo comes first for an exercise you have not yet played near its target tempo.
   let demo = !knowsExercise(S, item);
-  let demoTempo = Math.max(36, Math.round(item.bpm * 0.5));
-  const lowT = Math.max(30, Math.round(item.bpm * 0.4));
+  const target = targetOf(S, item);
+  let demoTempo = Math.max(36, Math.round(target * 0.5));
+  const lowT = Math.max(30, Math.round(target * 0.4));
   const total = minutes ? minutes * 60 : 0;
 
   show(`<main class="exercise">
@@ -969,7 +970,7 @@ function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
   function refresh() {
     const now = demo ? demoTempo : tempo;
     $('bpm').textContent = `${now} bpm`;
-    $('bpmNote').textContent = demo ? 'demo tempo' : now === item.bpm ? 'target tempo' : `target ${item.bpm}`;
+    $('bpmNote').textContent = demo ? 'demo tempo' : now === target ? 'target tempo' : `target ${target}`;
     $('demoBar').hidden = !demo;
     $('doneBtn').hidden = demo;
     $('demoBtn').hidden = demo;
@@ -1080,8 +1081,8 @@ function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
       rating = true;
       const hint = $('rateHint');
       if (best !== null) hint.textContent = `Best pass: ${best}%. ${best >= 85 ? 'That points to Solid.' : best >= 60 ? 'That points to Getting there.' : 'That points to Hard.'}`;
-      else if (tempo >= item.bpm * FAST_FACTOR) hint.textContent = `You played at ${tempo} bpm, well above the target of ${item.bpm}. Solid at this speed masters it straight away.`;
-      else hint.textContent = tempo < item.bpm * 0.9 ? `You played at ${tempo} bpm. The target is ${item.bpm}.` : '';
+      else if (tempo >= target * FAST_FACTOR) hint.textContent = `You played at ${tempo} bpm, well above the target of ${target}. Solid at this speed masters it straight away.`;
+      else hint.textContent = tempo < target * 0.9 ? `You played at ${tempo} bpm. The target is ${target}.` : '';
       $('rate').hidden = false;
     },
     resume: () => { rating = false; $('rate').hidden = true; },
@@ -1097,7 +1098,9 @@ function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
         $('twice').hidden = false;
         return;
       }
-      if (info.fast) toast('Well above tempo: mastered in one go. It comes back for review in a week.');
+      if (info.newTarget && info.becameMastered) toast(`Mastered. When it comes back for review, the new target is ${info.newTarget} bpm.`);
+      else if (info.newTarget) toast(`Solid. New target: ${info.newTarget} bpm.`);
+      else if (info.fast) toast('Well above tempo: mastered in one go. It comes back for review in a week.');
       else if (info.becameMastered) toast('Mastered. It comes back for a quick review in a few days.');
       else if (el.dataset.v === 'solid' && !info.atTempo) toast(`Next time a little faster: ${info.nextTempo} bpm.`);
       else if (el.dataset.v === 'hard') toast(`Next time a little slower: ${info.nextTempo} bpm.`);

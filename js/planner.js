@@ -1,7 +1,7 @@
 // Session planning and progress rules. Pure functions over the saved state, no DOM.
 
 import { TRACK_ITEMS, PIECE_ITEMS, ITEM_BY_ID, GENRES, PREP } from './content.js';
-import { parseExercise } from './music.js';
+import { parseExercise, pulseOf, barBeatsOf } from './music.js';
 
 export const DAY = 86400000;
 
@@ -76,7 +76,7 @@ export function setAside(state, id) {
   const p = (state.items[id] = { ...prog(state, id) });
   if (p.st === 'skipped' || p.st === 'new') p.st = 'learning';
   p.later = state.sessions + SET_ASIDE_SESSIONS;
-  p.bpm = Math.min(p.bpm || Infinity, Math.round(item.bpm * 0.6));
+  p.bpm = Math.min(p.bpm || Infinity, Math.round(targetOf(state, item) * 0.6));
   p.hardRun = 0;
   const e = state.items[easier.id];
   if (e && e.st === 'skipped') delete state.items[easier.id];
@@ -260,6 +260,31 @@ export function speedCheckStep(results, current, count) {
   return { level: best + 1 || 1, speed };
 }
 
+// ---- rising targets for technique
+//
+// Scales, arpeggios and other technique exercises get faster over time: each Solid rating at (or
+// near) the target raises it to whichever is higher, your tempo + 5% or the old target + 10%. It
+// stops at about 170 notes a minute (or 2.4 times the starting target, for slow chord exercises).
+// Genre exercises and pieces keep their target: that is the tempo the music is meant to have.
+const NOTES_PER_MINUTE_CAP = 170;
+export const rises = (item) => item.track === 'technique';
+
+// Notes per beat in the busiest hand, e.g. 1 for a quarter-note scale, 2 for eighth notes.
+function density(item) {
+  const p = parseExercise(item);
+  const perHand = (hand) => new Set(p.events.filter((e) => e.hand === hand).map((e) => e.t)).size;
+  return Math.max(perHand('R'), perHand('L')) / p.totalBeats;
+}
+
+export function maxTarget(item) {
+  return Math.round(Math.min(item.bpm * 2.4, NOTES_PER_MINUTE_CAP / Math.max(0.25, density(item))));
+}
+
+export function targetOf(state, item) {
+  const p = state.items[item.id];
+  return (p && p.target) || item.bpm;
+}
+
 // Tempo a new exercise starts at: 70% of the target, or more once you have shown you are faster
 // (in the skill check, or with a run of solid ratings at full tempo). There is no upper limit.
 export function startTempo(state, item) {
@@ -267,13 +292,13 @@ export function startTempo(state, item) {
   if (p && p.bpm) return p.bpm;
   let factor = (state.pace || 0) >= PACE_RUN ? 1 : 0.7;
   if (state.speed) factor = Math.max(factor, Math.min(1.5, state.speed * 0.85));
-  return Math.round(item.bpm * factor);
+  return Math.round(targetOf(state, item) * factor);
 }
 
 // Whether you have played this exercise at (nearly) its target tempo yet. If not, it opens with a demo.
 export function knowsExercise(state, item) {
   const p = state.items[item.id];
-  return !!p && (p.st === 'mastered' || (p.top || 0) >= item.bpm * 0.9);
+  return !!p && (p.st === 'mastered' || (p.top || 0) >= targetOf(state, item) * 0.9);
 }
 
 export const suggestLevelUp = (state) => (state.fastRun || 0) >= LEVEL_UP_RUN && state.profile.level.play < 3;
@@ -288,8 +313,9 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
   p.bpm = tempo;
   if (rating !== 'hard') p.top = Math.max(p.top || 0, tempo);
   p.hardRun = rating === 'hard' ? (p.hardRun || 0) + 1 : 0;
-  const atTempo = tempo >= item.bpm * 0.9;
-  const fast = rating === 'solid' && tempo >= item.bpm * FAST_FACTOR;
+  const target = targetOf(state, item);
+  const atTempo = tempo >= target * 0.9;
+  const fast = rating === 'solid' && tempo >= target * FAST_FACTOR;
   let becameMastered = false;
 
   if (wasMastered) {
@@ -304,10 +330,10 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
     p.st = 'learning';
     if (rating === 'hard') {
       p.solid = 0;
-      p.bpm = Math.max(Math.round(item.bpm * 0.5), Math.round(tempo * 0.9));
+      p.bpm = Math.max(Math.round(target * 0.5), Math.round(tempo * 0.9));
     } else if (rating === 'solid') {
       if (atTempo) p.solid += 1;
-      else p.bpm = Math.min(item.bpm, Math.round(tempo * 1.12));
+      else p.bpm = Math.min(target, Math.round(tempo * 1.12));
       // Solid and clearly faster than planned: no need to prove it twice, and the review can wait longer.
       if (p.solid >= 2 || fast) {
         p.st = 'mastered';
@@ -318,11 +344,17 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
     }
   }
   // A run of solid ratings at full tempo means the slow start is not needed for the next new exercise.
-  if (rating === 'solid' && tempo >= item.bpm) state.pace = (state.pace || 0) + 1;
+  // Technique: Solid at (or near) the target raises it, so the exercise keeps you growing.
+  let newTarget = null;
+  if (rises(item) && rating === 'solid' && atTempo && p.st === 'mastered') {
+    const next = Math.min(maxTarget(item), Math.max(Math.round(tempo * 1.05), Math.round(target * 1.1)));
+    if (next > target) { p.target = next; newTarget = next; }
+  }
+  if (rating === 'solid' && tempo >= target) state.pace = (state.pace || 0) + 1;
   else if (rating === 'hard' || (rating === 'solid' && !atTempo)) state.pace = 0;
   if (becameMastered && fast) state.fastRun = (state.fastRun || 0) + 1;
   else if (becameMastered || rating === 'hard') state.fastRun = 0;
-  return { becameMastered, fast: becameMastered && fast, atTempo, nextTempo: p.bpm, target: item.bpm, hardTwice: p.hardRun >= 2 };
+  return { becameMastered, fast: becameMastered && fast, atTempo, nextTempo: p.bpm, target, newTarget, hardTwice: p.hardRun >= 2 };
 }
 
 // Record a finished (or partly finished) session and move the queue on.
