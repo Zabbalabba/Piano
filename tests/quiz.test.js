@@ -10,15 +10,15 @@ test('no change before 20 answers, however they went', () => {
 });
 
 test('after 20, only an unmistakable result moves the level early', () => {
-  assert.equal(adjustLevel(1, log(19, 1)), 2); // 95%
-  assert.equal(adjustLevel(1, log(18, 2)), 1); // 90%: wait for 40
+  assert.equal(adjustLevel(1, log(18, 2)), 2); // 90%
+  assert.equal(adjustLevel(1, log(17, 3)), 1); // 85%: wait for 40
   assert.equal(adjustLevel(2, log(10, 10)), 1); // 50%
   assert.equal(adjustLevel(2, log(11, 9)), 2);
 });
 
-test('over 40 answers: 90% moves up, under 60% moves down', () => {
-  assert.equal(adjustLevel(1, log(36, 4)), 2);
-  assert.equal(adjustLevel(1, log(35, 5)), 1);
+test('over 40 answers: 85% moves up, under 60% moves down', () => {
+  assert.equal(adjustLevel(1, log(34, 6)), 2);
+  assert.equal(adjustLevel(1, log(33, 7)), 1);
   assert.equal(adjustLevel(2, log(23, 17)), 1);
   assert.equal(adjustLevel(2, log(24, 16)), 2);
   assert.equal(adjustLevel(3, log(40, 0)), 3);
@@ -26,7 +26,7 @@ test('over 40 answers: 90% moves up, under 60% moves down', () => {
 });
 
 test('only the most recent 40 answers count', () => {
-  assert.equal(adjustLevel(1, [...log(0, 30), ...log(37, 3)]), 2);
+  assert.equal(adjustLevel(1, [...log(0, 30), ...log(34, 6)]), 2);
   const st = levelStatus([...log(0, 30), ...log(30, 10)]);
   assert.deepEqual([st.answers, st.right], [40, 30]);
 });

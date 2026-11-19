@@ -482,6 +482,8 @@ function runQuiz(kind, done) {
     show(`<main class="page picker">
       <div class="topbar"><button class="icon-btn" data-act="back" aria-label="Back">✕</button><b>${title}</b><span></span></div>
       <p class="lead center-text">Level ${S.profile.level[key]} · ${levelName()}</p>
+      ${adjustLevel(S.profile.level[key], S.quiz[key]) > S.profile.level[key] ? `<div class="card levelup"><p><b>You are ready for level ${S.profile.level[key] + 1}.</b> Move up now, or stay a while longer if it felt like luck.</p>
+        <div class="two-btns"><button class="btn" data-act="notYet">Not yet</button><button class="btn primary" data-act="moveUp">Move up</button></div></div>` : ''}
       <div class="stepper">
         <button class="round" data-act="less" ${total <= 5 ? 'disabled' : ''} aria-label="Five fewer">−</button>
         <div class="big-num">${total}<small>questions</small></div>
@@ -492,6 +494,8 @@ function runQuiz(kind, done) {
       <div class="foot"><button class="btn primary big" data-act="start">Start</button></div>
     </main>`, {
       back: () => done(0, true),
+      moveUp: () => { S.profile.level[key] += 1; S.quiz[key] = []; save(); choose(); },
+      notYet: () => { S.quiz[key] = []; save(); choose(); },
       less: () => { total = Math.max(5, total - 5); choose(); },
       more: () => { total = Math.min(100, total + 5); choose(); },
       set: (el) => { total = Number(el.dataset.v); choose(); },
@@ -510,20 +514,31 @@ function runQuiz(kind, done) {
     let right = 0;
     let last = null;
     let moved = 0;
+    const results = (minutes) => {
+      const st = levelStatus(S.quiz[key]);
+      const lvl = S.profile.level[key];
+      const ready = adjustLevel(lvl, S.quiz[key]) > lvl;
+      const pct = `${st.right} of your last ${st.answers} right (${Math.round(st.share * 100)}%)`;
+      const where = moved > 0 ? `You moved up to level ${lvl}. Your count starts fresh at this level.`
+        : moved < 0 ? `You moved back to level ${lvl} to make it solid. Your count starts fresh here.`
+        : moved === 'declined' ? 'Staying at this level. Your count starts fresh, so the next offer is based on new answers.'
+        : st.answers < 20 ? `${st.answers} answers at this level so far. Moving up can be offered from 20 answers on, at 90% right, and otherwise over ${LEVEL_WINDOW} answers at 85%.`
+        : `${pct}. 85% or more over ${LEVEL_WINDOW} answers is ready to move up; under 60% moves you back.`;
+      show(`<main class="page center"><h1>${right} of ${total}</h1>
+        <p class="lead">${title} · level ${lvl} · ${levelName()}</p>
+        ${ready && !moved ? `<div class="card levelup"><p><b>Ready for level ${lvl + 1}?</b> ${pct}. Next: ${(kind === 'read' ? READ_LEVELS : EAR_LEVELS)[lvl + 1]}. If it felt like luck, stay a while longer.</p>
+          <div class="two-btns"><button class="btn" data-act="notYet">Not yet</button><button class="btn primary" data-act="moveUp">Move up</button></div></div>`
+          : `<div class="card"><p class="muted">${where}</p></div>`}
+        <div class="foot"><button class="btn primary" data-act="ok">Done</button></div></main>`, {
+        ok: () => done(minutes),
+        moveUp: () => { S.profile.level[key] = lvl + 1; S.quiz[key] = []; moved = 1; save(); results(minutes); },
+        notYet: () => { S.quiz[key] = []; moved = 'declined'; save(); results(minutes); },
+      });
+    };
     const ask = () => {
       if (i >= total) {
-        const minutes = Math.min(total * 0.5, (Date.now() - started) / 60000);
         save();
-        const st = levelStatus(S.quiz[key]);
-        const lvl = S.profile.level[key];
-        const where = moved > 0 ? `You moved up to level ${lvl}. Your count starts fresh at this level.`
-          : moved < 0 ? `You moved back to level ${lvl} to make it solid. Your count starts fresh here.`
-          : st.answers < 20 ? `${st.answers} answers at this level so far. The level is first reviewed after 20, if the result is very clear, and otherwise after ${LEVEL_WINDOW}.`
-          : `${st.right} of your last ${st.answers} right (${Math.round(st.share * 100)}%). 90% or more over ${LEVEL_WINDOW} answers moves you up; under 60% moves you back.`;
-        return show(`<main class="page center"><h1>${right} of ${total}</h1>
-          <p class="lead">${title} · level ${lvl} · ${levelName()}</p>
-          <div class="card"><p class="muted">${where}</p></div>
-          <div class="foot"><button class="btn primary" data-act="ok">Done</button></div></main>`, { ok: () => done(minutes) });
+        return results(Math.min(total * 0.5, (Date.now() - started) / 60000));
       }
       const level = S.profile.level[key];
       const q = kind === 'read' ? readingQuestion(level, last) : earQuestion(level);
@@ -535,12 +550,13 @@ function runQuiz(kind, done) {
           i += 1;
           if (ok) right += 1;
           S.quiz[key] = [...S.quiz[key], ok ? 1 : 0].slice(-LEVEL_WINDOW);
+          // Moving back happens straight away; moving up is offered at the end of the round.
           const next = adjustLevel(level, S.quiz[key]);
-          if (next !== level) {
+          if (next < level) {
             S.profile.level[key] = next;
             S.quiz[key] = [];
-            moved = next - level;
-            toast(next > level ? 'Level up. The questions get a little harder.' : 'Stepping back a level to make this solid.');
+            moved = -1;
+            toast('Stepping back a level to make this solid.');
           }
           save();
           ask();

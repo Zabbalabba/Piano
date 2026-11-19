@@ -19,8 +19,8 @@ and installs to a phone's home screen.
   its place. After two Hard ratings in a row, the app offers this itself.
 - **Every exercise explains itself**: what it is, what it does for you, and how to practise it.
 - **Ear training and note reading**: choose the number of questions (steps of 5). Levels are reviewed
-  over your last 40 answers at that level (90% right moves up, under 60% moves back), or after 20
-  when the result is unmistakable (95% / 50%).
+  over your last 40 answers at that level (85% right is ready to move up, under 60% moves back), or
+  from 20 answers on at 90% / 50%. Moving up is offered, and you can decline.
 - **No tempo limit**: play as fast as you can, and progress follows.
 - **Skill check** at setup (note reading, ear, sight-reading passages and a speed check on real exercises), **ear training** and **note reading** as optional extras or on their own.
 - **Progress** centred on a weekly goal rather than a daily streak.
