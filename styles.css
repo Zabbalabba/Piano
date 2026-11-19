@@ -249,3 +249,4 @@ button:disabled { opacity: 0.4; cursor: default; }
 @media (orientation: landscape) and (max-height: 500px) { .ex-head .gain { display: none; } }
 .center-text { text-align: center; }
 .quiz-notes { margin: 8px 0 12px; text-align: left; }
+.levelup.down { border-color: var(--accent); }

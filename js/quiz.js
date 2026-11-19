@@ -15,17 +15,26 @@ function naturals(from, to) {
   return out;
 }
 
+// Small steps, so moving a level in either direction is never a big jump.
 const READ_POOLS = {
   1: [['treble', naturals('C4', 'G4')]],
-  2: [['treble', naturals('C4', 'G5')], ['bass', naturals('C3', 'C4')]],
-  3: [['treble', naturals('A3', 'C6')], ['bass', naturals('C2', 'E4')]],
+  2: [['treble', naturals('C4', 'G5')]],
+  3: [['bass', naturals('F2', 'C4')]],
+  4: [['treble', naturals('C4', 'G5')], ['bass', naturals('F2', 'C4')]],
+  5: [['treble', naturals('A3', 'C6')], ['bass', naturals('C2', 'E4')]],
 };
 
 export const READ_LEVELS = {
   1: 'Treble clef, middle C to G',
-  2: 'Treble clef and bass clef',
-  3: 'Both clefs with ledger lines',
+  2: 'The whole treble staff',
+  3: 'The bass clef',
+  4: 'Both clefs mixed',
+  5: 'Both clefs with ledger lines',
 };
+
+export const MAX_LEVEL = { read: 5, ear: 4 };
+// Levels before they were split into smaller steps, mapped to the matching new level.
+export const OLD_LEVELS = { read: { 1: 1, 2: 4, 3: 5 }, ear: { 1: 1, 2: 2, 3: 4 } };
 
 // ---- what you find hard
 //
@@ -71,14 +80,15 @@ const INTERVALS = {
 export const EAR_LEVELS = {
   1: 'Higher or lower',
   2: 'Step, third, fifth or octave',
-  3: 'All basic intervals, and major or minor chords',
+  3: 'Adds half step, fourth and minor third',
+  4: 'Adds major and minor chords',
 };
 
 export function earPool(level) {
   if (level === 1) return [2, 3, 4, 5, 7].map((gap) => ({ key: `hl:${gap}`, type: 'hl', gap }));
   const set = level === 2 ? [2, 4, 7, 12] : [1, 2, 3, 4, 5, 7, 12];
   const pool = set.map((semis) => ({ key: `int:${semis}`, type: 'int', semis, set }));
-  if (level === 3) pool.push({ key: 'chord:major', type: 'chord', major: true }, { key: 'chord:minor', type: 'chord', major: false });
+  if (level >= 4) pool.push({ key: 'chord:major', type: 'chord', major: true }, { key: 'chord:minor', type: 'chord', major: false });
   return pool;
 }
 
@@ -160,42 +170,63 @@ export function progressNotes(stats, keysThisRound) {
   return { stronger: stronger.slice(0, 3), tricky: tricky.slice(0, 3) };
 }
 
-// Level changes are based on your recent answers at the current level (answers from an earlier
-// level do not count). Over the last 40: 85% or more right is ready to move up, under 60% moves
-// you back. In the first 20 to 39 answers, 90% or more is ready to move up early, 50% or less moves
-// you back. Moving up is offered, not forced: you can decline if you feel you got lucky.
+// ---- level decisions
+//
+// Moving up looks at your last 40 answers at this level: 85% or more is ready, or 90% or more
+// once you have 20. It is offered, and you can decline.
+//
+// Moving back: your first 20 answers after a level change never count against you. After that,
+// a step back is offered at the end of a round when you are under 60%. It only happens
+// automatically when you are clearly lost: 50% or less over 40 answers, and under 60% of answers
+// right. Declining an offer keeps it quiet for 20 more answers.
+//
+// The score gives every question type the same weight, so seeing your weak spots more often does
+// not drag it down. A type you have seen only a few times counts close to your overall result
+// until it has a few answers of its own.
 export const LEVEL_WINDOW = 40;
 export const EARLY_AFTER = 20;
+export const GRACE = 20;
+const PRIOR = 3;
 
-// Log entries are { k: key, s: 1 or 0 } (older saved logs hold plain 1 and 0). The share right
-// gives every question type the same weight, so seeing your weak spots more often does not drag
-// your level score down.
-const entry = (x) => (typeof x === 'number' ? { k: '?', s: x } : x);
+// Log entries are { k: key, s: 1 or 0 }. Older saved logs hold plain 1 and 0: those count towards
+// your overall result but not as a question type of their own.
+const entry = (x) => (typeof x === 'number' ? { k: null, s: x } : x);
+export const rawShare = (log) => (log.length ? log.map(entry).filter((x) => x.s > 0).length / log.length : 0);
+
 export function balancedShare(log) {
+  const list = log.map(entry);
+  if (!list.length) return 0;
+  const overall = rawShare(list);
   const byKey = new Map();
-  for (const x of log.map(entry)) {
+  for (const x of list) {
+    if (x.k === null) continue;
     const v = byKey.get(x.k) || [0, 0];
     byKey.set(x.k, [v[0] + (x.s > 0 ? 1 : 0), v[1] + 1]);
   }
-  if (!byKey.size) return 0;
+  if (!byKey.size) return overall;
   let sum = 0;
-  for (const [r, n] of byKey.values()) sum += r / n;
+  for (const [r, n] of byKey.values()) sum += (r + PRIOR * overall) / (n + PRIOR);
   return sum / byKey.size;
 }
 
-export function adjustLevel(level, log) {
+// count: answers at this level since the last level change (the log only keeps the recent ones).
+// quietUntil: after a declined step-back offer, no new offer before this count.
+export function levelDecision(kind, level, log, count = log.length, quietUntil = 0) {
   const recent = log.slice(-LEVEL_WINDOW);
   const n = recent.length;
-  const share = balancedShare(recent);
-  const full = n >= LEVEL_WINDOW;
-  if (n >= EARLY_AFTER) {
-    if (level < 3 && share >= (full ? 0.85 : 0.9)) return level + 1;
-    if (level > 1 && share < (full ? 0.6 : 0.5000001)) return level - 1;
+  if (level < MAX_LEVEL[kind] && n >= EARLY_AFTER && balancedShare(recent) >= (n >= LEVEL_WINDOW ? 0.85 : 0.9)) return 'up';
+  if (level > 1 && count > GRACE) {
+    const judged = log.slice(-Math.min(LEVEL_WINDOW, count - GRACE));
+    if (judged.length >= EARLY_AFTER) {
+      const share = balancedShare(judged);
+      if (judged.length >= LEVEL_WINDOW && share <= 0.5 && rawShare(judged) < 0.6) return 'down';
+      if (share < 0.6 && count >= quietUntil) return 'offerDown';
+    }
   }
-  return level;
+  return null;
 }
 
-// Where you stand towards the next level review, for the results screen.
+// Where you stand, for the results screen.
 export function levelStatus(log) {
   const recent = log.slice(-LEVEL_WINDOW);
   const right = recent.map(entry).filter((x) => x.s > 0).length;

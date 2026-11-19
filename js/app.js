@@ -8,10 +8,11 @@ import {
 } from './planner.js';
 import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from './audio.js';
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
-import { createPlayer } from './player.js';
+import { createPlayer, stopAllPlayers } from './player.js';
 import { renderSheet, renderNote } from './sheet.js';
 import {
-  readingQuestion, earQuestion, adjustLevel, levelStatus, READ_LEVELS, EAR_LEVELS, LEVEL_WINDOW,
+  readingQuestion, earQuestion, levelDecision, levelStatus, READ_LEVELS, EAR_LEVELS, LEVEL_WINDOW, GRACE,
+  MAX_LEVEL, OLD_LEVELS,
   recordAnswer, isSlow, keyName, progressNotes,
 } from './quiz.js';
 
@@ -37,16 +38,36 @@ function load() {
           ...base.quiz, ...saved.quiz,
           stats: { ...base.quiz.stats, ...((saved.quiz || {}).stats || {}) },
           times: { ...base.quiz.times, ...((saved.quiz || {}).times || {}) },
+          count: { ...base.quiz.count, ...((saved.quiz || {}).count || {}) },
+          levels: (saved.quiz || {}).levels || 1,
+          quiet: { ...base.quiz.quiet, ...((saved.quiz || {}).quiet || {}) },
         },
       };
     }
   } catch { /* start fresh */ }
   return base;
 }
-let S = load();
+// Bring older saved data up to date.
+function migrate(st) {
+  if ((st.quiz.levels || 1) < 2) {
+    // The levels were split into smaller steps: map each old level to the matching new one.
+    for (const k of ['read', 'ear']) st.profile.level[k] = OLD_LEVELS[k][st.profile.level[k]] || 1;
+    // Answers already given at this level count, so this is not treated as a fresh start.
+    for (const k of ['read', 'ear']) st.quiz.count[k] = Math.max(st.quiz.count[k] || 0, st.quiz[k].length + GRACE);
+    // Rounds that were left open were counted with all their idle time: cap them.
+    for (const h of st.history) {
+      if (h.core === false && (h.extras || []).length && h.extras.every((x) => x === 'ear' || x === 'read') && h.min > 15) h.min = 5;
+    }
+    st.quiz.levels = 2;
+  }
+  return st;
+}
+let S = migrate(load());
 const save = () => {
   try { localStorage.setItem(KEY, JSON.stringify(S)); } catch { toast('Could not save on this device.'); }
 };
+// Store any update from migrate() straight away.
+try { if (localStorage.getItem(KEY)) localStorage.setItem(KEY, JSON.stringify(S)); } catch { /* not available */ }
 
 // ---------------------------------------------------------------- appearance
 
@@ -284,7 +305,7 @@ function skillCheck(done) {
   const head = (n) => `<div class="steps">${[1, 2, 3, 4].map((i) => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</div>`;
 
   const finish = () => {
-    const seg = (key, names) => `<div class="seg">${[1, 2, 3].map((l) => `<button class="${result[key] === l ? 'on' : ''}" data-act="lvl" data-k="${key}" data-v="${l}" title="${esc(names[l])}">${l}</button>`).join('')}</div>`;
+    const seg = (key, names) => `<div class="seg">${Object.keys(names).map(Number).map((l) => `<button class="${result[key] === l ? 'on' : ''}" data-act="lvl" data-k="${key}" data-v="${l}" title="${esc(names[l])}">${l}</button>`).join('')}</div>`;
     show(`<main class="page setup">${head(4)}<h1>Your starting point</h1>
       <p class="lead">This sets which exercises come first. It adjusts as you practise, and you can change it here.</p>
       <div class="card rows">
@@ -299,7 +320,7 @@ function skillCheck(done) {
         S.speed = result.speed || 0;
         S.fastRun = 0;
         S.profile.level.ear = result.ear;
-        S.quiz = { ...S.quiz, ear: [], read: [] };
+        S.quiz = { ...S.quiz, ear: [], read: [], count: { ear: 0, read: 0 }, quiet: { ear: 0, read: 0 } };
         applyLevel(S, result.play);
         save();
         done();
@@ -340,15 +361,16 @@ function skillCheck(done) {
     try { renderSheet(document.getElementById('pv'), item); } catch (err) { console.error(err); }
   };
 
-  // Six questions at most, harder after two right in a row, stops after two misses.
+  // Harder after two right in a row; stops after two misses or when the top level is reached.
   const quizStep = (kind, n, then) => {
+    const top = MAX_LEVEL[kind];
     let level = 1;
     let streak = 0;
     let misses = 0;
     let asked = 0;
     let last = null;
     const ask = () => {
-      if (asked >= 6 || misses >= 2) { result[kind] = level; return then(); }
+      if (asked >= 2 * top || misses >= 2) { result[kind] = level; return then(); }
       asked += 1;
       const q = kind === 'read' ? readingQuestion(level, last) : earQuestion(level);
       last = q;
@@ -357,7 +379,7 @@ function skillCheck(done) {
         skip: kind === 'read' ? 'I cannot read notes yet' : 'Skip this part',
         onSkip: () => { result[kind] = 1; then(); },
         onAnswer: (right) => {
-          if (right) { streak += 1; if (streak >= 2 && level < 3) { level += 1; streak = 0; } } else { streak = 0; misses += 1; }
+          if (right) { streak += 1; if (streak >= 2 && level < top) { level += 1; streak = 0; } } else { streak = 0; misses += 1; }
           ask();
         },
       });
@@ -482,17 +504,29 @@ function askQuestion({ kind, q, header, skip, onSkip, onAnswer, progressText = '
 }
 
 // Reading or ear training. You choose how many questions first (in steps of 5). Calls done(minutes, quit).
+// Level changes are only ever decided at the end of a round, never in the middle of one.
 function runQuiz(kind, done) {
   const key = kind === 'read' ? 'read' : 'ear';
   const title = kind === 'read' ? 'Note reading' : 'Ear training';
-  const levelName = () => (kind === 'read' ? READ_LEVELS : EAR_LEVELS)[S.profile.level[key]];
+  const NAMES = kind === 'read' ? READ_LEVELS : EAR_LEVELS;
+  const levelName = (l = S.profile.level[key]) => NAMES[l];
+  const decide = () => levelDecision(key, S.profile.level[key], S.quiz[key], S.quiz.count[key], S.quiz.quiet[key]);
+  // A level change: the count starts fresh, and the first answers at the new level are free.
+  const setLevel = (l) => {
+    S.profile.level[key] = l;
+    S.quiz[key] = [];
+    S.quiz.count[key] = 0;
+    S.quiz.quiet[key] = 0;
+    save();
+  };
   let total = S.settings.quizCount || 10;
 
   const choose = () => {
+    const lvl = S.profile.level[key];
     show(`<main class="page picker">
       <div class="topbar"><button class="icon-btn" data-act="back" aria-label="Back">✕</button><b>${title}</b><span></span></div>
-      <p class="lead center-text">Level ${S.profile.level[key]} · ${levelName()}</p>
-      ${adjustLevel(S.profile.level[key], S.quiz[key]) > S.profile.level[key] ? `<div class="card levelup"><p><b>You are ready for level ${S.profile.level[key] + 1}.</b> Move up now, or stay a while longer if it felt like luck.</p>
+      <p class="lead center-text">Level ${lvl} of ${MAX_LEVEL[key]} · ${esc(levelName())}</p>
+      ${decide() === 'up' ? `<div class="card levelup"><p><b>You are ready for level ${lvl + 1}: ${esc(levelName(lvl + 1))}.</b> Move up now, or stay a while longer if it felt like luck.</p>
         <div class="two-btns"><button class="btn" data-act="notYet">Not yet</button><button class="btn primary" data-act="moveUp">Move up</button></div></div>` : ''}
       <div class="stepper">
         <button class="round" data-act="less" ${total <= 5 ? 'disabled' : ''} aria-label="Five fewer">−</button>
@@ -504,7 +538,7 @@ function runQuiz(kind, done) {
       <div class="foot"><button class="btn primary big" data-act="start">Start</button></div>
     </main>`, {
       back: () => done(0, true),
-      moveUp: () => { S.profile.level[key] += 1; S.quiz[key] = []; save(); choose(); },
+      moveUp: () => { setLevel(lvl + 1); choose(); },
       notYet: () => { S.quiz[key] = []; save(); choose(); },
       less: () => { total = Math.max(5, total - 5); choose(); },
       more: () => { total = Math.min(100, total + 5); choose(); },
@@ -519,74 +553,91 @@ function runQuiz(kind, done) {
   };
 
   const run = () => {
-    const started = Date.now();
     let i = 0;
     let right = 0;
     let last = null;
-    let moved = 0;
     const asked = [];
-    const results = (minutes) => {
+    // Only time spent on questions counts, at most a minute per question, so a round left open
+    // does not add up to an hour of "practice".
+    let active = 0;
+    let shownAt = performance.now();
+    const minutes = () => (active + Math.min(60000, performance.now() - shownAt)) / 60000;
+
+    const results = (mins, moved = null) => {
       const notes = progressNotes(S.quiz.stats[key], asked);
       const list = (keys) => keys.map(keyName).map(esc).join(' · ');
       const progressHtml = notes.stronger.length || notes.tricky.length ? `<div class="card rows quiz-notes">
         ${notes.stronger.length ? `<div class="row"><span><b>Getting stronger</b><small>${list(notes.stronger)}</small></span></div>` : ''}
         ${notes.tricky.length ? `<div class="row"><span><b>Still tricky</b><small>${list(notes.tricky)}. These come up a little more often.</small></span></div>` : ''}
       </div>` : '';
-      const st = levelStatus(S.quiz[key]);
       const lvl = S.profile.level[key];
-      const ready = adjustLevel(lvl, S.quiz[key]) > lvl;
+      const st = levelStatus(S.quiz[key]);
+      const count = S.quiz.count[key];
+      const decision = moved ? null : decide();
       const pct = `${st.right} of your last ${st.answers} right, ${Math.round(st.share * 100)}% with every ${kind === 'read' ? 'note' : 'question type'} counted equally`;
-      const where = moved > 0 ? `You moved up to level ${lvl}. Your count starts fresh at this level.`
-        : moved < 0 ? `You moved back to level ${lvl} to make it solid. Your count starts fresh here.`
-        : moved === 'declined' ? 'Staying at this level. Your count starts fresh, so the next offer is based on new answers.'
-        : st.answers < 20 ? `${st.answers} answers at this level so far. Moving up can be offered from 20 answers on, at 90% right, and otherwise over ${LEVEL_WINDOW} answers at 85%.`
-        : `${pct}. 85% or more over ${LEVEL_WINDOW} answers is ready to move up; under 60% moves you back.`;
+      let card;
+      if (decision === 'up') {
+        card = `<div class="card levelup"><p><b>Ready for level ${lvl + 1}?</b> ${pct}. Next: ${esc(levelName(lvl + 1))}. If it felt like luck, stay a while longer.</p>
+          <div class="two-btns"><button class="btn" data-act="notYet">Not yet</button><button class="btn primary" data-act="moveUp">Move up</button></div></div>`;
+      } else if (decision === 'offerDown') {
+        card = `<div class="card levelup down"><p><b>Step back to level ${lvl - 1} for a while?</b> ${pct}. Level ${lvl - 1}: ${esc(levelName(lvl - 1))}. Or keep going: this level is still within reach, and the questions you miss come up more often.</p>
+          <div class="two-btns"><button class="btn" data-act="keepGoing">Keep going</button><button class="btn primary" data-act="stepBack">Step back</button></div></div>`;
+      } else {
+        const where = moved === 'up' ? `You moved up to level ${lvl}. Your first ${GRACE} answers here never count against you.`
+          : moved === 'down' ? `You moved back to level ${lvl} to make it solid. Your count starts fresh here.`
+          : moved === 'auto' ? `Most answers at the last level were guesses, so you moved back to level ${lvl} to make it solid. Your count starts fresh here.`
+          : moved === 'stay' ? 'Staying at this level. The next offer is based on new answers.'
+          : moved === 'keep' ? `Keeping this level. No step-back offer for at least ${GRACE} more answers.`
+          : count <= GRACE ? `${st.answers} answers at this level so far. Moving up can be offered from 20 answers on, at 90%. Your first ${GRACE} answers at a level never count against you.`
+          : `${pct}. 85% or more over ${LEVEL_WINDOW} answers is ready to move up.`;
+        card = `<div class="card"><p class="muted">${where}</p></div>`;
+      }
       show(`<main class="page center"><h1>${right} of ${total}</h1>
-        <p class="lead">${title} · level ${lvl} · ${levelName()}</p>
-        ${progressHtml}
-        ${ready && !moved ? `<div class="card levelup"><p><b>Ready for level ${lvl + 1}?</b> ${pct}. Next: ${(kind === 'read' ? READ_LEVELS : EAR_LEVELS)[lvl + 1]}. If it felt like luck, stay a while longer.</p>
-          <div class="two-btns"><button class="btn" data-act="notYet">Not yet</button><button class="btn primary" data-act="moveUp">Move up</button></div></div>`
-          : `<div class="card"><p class="muted">${where}</p></div>`}
+        <p class="lead">${title} · level ${lvl} · ${esc(levelName())}</p>
+        ${progressHtml}${card}
         <div class="foot"><button class="btn primary" data-act="ok">Done</button></div></main>`, {
-        ok: () => done(minutes),
-        moveUp: () => { S.profile.level[key] = lvl + 1; S.quiz[key] = []; moved = 1; save(); results(minutes); },
-        notYet: () => { S.quiz[key] = []; moved = 'declined'; save(); results(minutes); },
+        ok: () => done(mins),
+        moveUp: () => { setLevel(lvl + 1); results(mins, 'up'); },
+        notYet: () => { S.quiz[key] = []; save(); results(mins, 'stay'); },
+        stepBack: () => { setLevel(lvl - 1); results(mins, 'down'); },
+        keepGoing: () => { S.quiz.quiet[key] = count + GRACE; save(); results(mins, 'keep'); },
       });
     };
+
     const ask = () => {
       if (i >= total) {
+        // Only when clearly lost does the app move you back by itself.
+        if (decide() === 'down') {
+          setLevel(S.profile.level[key] - 1);
+          return results(active / 60000, 'auto');
+        }
         save();
-        return results(Math.min(total * 0.5, (Date.now() - started) / 60000));
+        return results(active / 60000);
       }
       const level = S.profile.level[key];
       const stats = S.quiz.stats[key];
       const q = kind === 'read' ? readingQuestion(level, last, Math.random, stats) : earQuestion(level, Math.random, stats, last);
       last = q;
+      shownAt = performance.now();
       askQuestion({
         kind, q,
         header: `<div class="topbar"><button class="icon-btn" data-act="quit" aria-label="Close">✕</button><b>${title}</b><span>${i + 1} / ${total}</span></div>`,
         onAnswer: (ok, ms) => {
           i += 1;
           if (ok) right += 1;
+          active += Math.min(60000, ms) + (ok ? 650 : 1500);
           // A right but much slower than usual answer counts as half a struggle (note reading only).
           const slow = kind === 'read' && ok && isSlow(ms, S.quiz.times.read);
           if (kind === 'read' && ok) S.quiz.times.read = [...S.quiz.times.read, Math.round(ms)].slice(-20);
           S.quiz.stats[key] = recordAnswer(S.quiz.stats[key], q.key, ok ? (slow ? 0.5 : 1) : 0);
           asked.push(q.key);
           S.quiz[key] = [...S.quiz[key], { k: q.key, s: ok ? 1 : 0 }].slice(-LEVEL_WINDOW);
-          // Moving back happens straight away; moving up is offered at the end of the round.
-          const next = adjustLevel(level, S.quiz[key]);
-          if (next < level) {
-            S.profile.level[key] = next;
-            S.quiz[key] = [];
-            moved = -1;
-            toast('Stepping back a level to make this solid.');
-          }
+          S.quiz.count[key] += 1;
           save();
           ask();
         },
       });
-      actions.quit = () => done((Date.now() - started) / 60000, true);
+      actions.quit = () => done(minutes(), true);
     };
     ask();
   };
@@ -1212,7 +1263,7 @@ function settings() {
     reset: () => {
       if (!confirm('Erase all progress and settings on this device?')) return;
       localStorage.removeItem(KEY);
-      S = load();
+      S = migrate(load());
       applyTheme();
       home();
     },
@@ -1225,7 +1276,7 @@ function settings() {
       const data = JSON.parse(await file.text());
       if (data.v !== 1 || !data.profile || !data.settings) throw new Error('wrong file');
       localStorage.setItem(KEY, JSON.stringify(data));
-      S = load();
+      S = migrate(load());
       applyTheme();
       toast('Backup restored.');
       settings();
@@ -1238,7 +1289,8 @@ function settings() {
 // ---------------------------------------------------------------- start
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) silence();
+  // Leaving the app stops whatever is playing; the sound comes back on the first tap after returning.
+  if (document.hidden) { stopAllPlayers(); silence(); }
   else applyTheme();
 });
 applyTheme();

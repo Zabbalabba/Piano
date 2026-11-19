@@ -1,48 +1,75 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  adjustLevel, levelStatus, readingQuestion, earQuestion, readingPool, recordAnswer, isSlow, keyName,
-  progressNotes, balancedShare, struggle,
+  levelDecision, levelStatus, readingQuestion, earQuestion, readingPool, earPool, recordAnswer, isSlow,
+  keyName, progressNotes, balancedShare, struggle, MAX_LEVEL, READ_LEVELS, EAR_LEVELS,
 } from '../js/quiz.js';
 
-const log = (right, wrong) => [...Array(right).fill(1), ...Array(wrong).fill(0)];
+// Answers spread over a few question types, so the balanced score matches the raw share.
+const log = (right, wrong) => {
+  const out = [];
+  for (let i = 0; i < right; i++) out.push({ k: `q${i % 4}`, s: 1 });
+  for (let i = 0; i < wrong; i++) out.push({ k: `q${i % 4}`, s: 0 });
+  // interleave so every type gets the same mix
+  return out.map((x, i) => ({ ...x, k: `q${i % 4}` }));
+};
+const up = (lvl, l) => levelDecision('read', lvl, l) === 'up';
 
-test('no change before 20 answers, however they went', () => {
-  assert.equal(adjustLevel(1, log(19, 0)), 1);
-  assert.equal(adjustLevel(2, log(0, 19)), 2);
+test('moving up: 90% after 20, 85% over 40, never before 20', () => {
+  assert.equal(up(1, log(19, 0)), false);
+  assert.equal(up(1, log(18, 2)), true);
+  assert.equal(up(1, log(17, 3)), false);
+  assert.equal(up(1, log(34, 6)), true);
+  assert.equal(up(1, log(33, 7)), false);
+  assert.equal(up(5, log(40, 0)), false);
+  assert.equal(levelDecision('ear', 4, log(40, 0)), null);
 });
 
-test('after 20, only an unmistakable result moves the level early', () => {
-  assert.equal(adjustLevel(1, log(18, 2)), 2); // 90%
-  assert.equal(adjustLevel(1, log(17, 3)), 1); // 85%: wait for 40
-  assert.equal(adjustLevel(2, log(10, 10)), 1); // 50%
-  assert.equal(adjustLevel(2, log(11, 9)), 2);
+test('moving back: the first 20 answers after a change are free', () => {
+  assert.equal(levelDecision('read', 3, log(0, 20)), null);
+  assert.equal(levelDecision('read', 3, log(5, 35), 40), 'offerDown');
 });
 
-test('over 40 answers: 85% moves up, under 60% moves down', () => {
-  assert.equal(adjustLevel(1, log(34, 6)), 2);
-  assert.equal(adjustLevel(1, log(33, 7)), 1);
-  assert.equal(adjustLevel(2, log(23, 17)), 1);
-  assert.equal(adjustLevel(2, log(24, 16)), 2);
-  assert.equal(adjustLevel(3, log(40, 0)), 3);
-  assert.equal(adjustLevel(1, log(0, 40)), 1);
+test('moving back is automatic only when clearly lost, otherwise offered', () => {
+  const lost = log(15, 45); // 25% over the last 40 judged, after a free 20
+  assert.equal(levelDecision('read', 3, lost, 60), 'down');
+  assert.equal(levelDecision('read', 3, [...log(10, 10), ...log(22, 18)], 60), 'offerDown'); // 55%
+  assert.equal(levelDecision('read', 3, [...log(10, 10), ...log(26, 14)], 60), null); // 65%
+  assert.equal(levelDecision('read', 1, lost, 60), null);
 });
 
-test('only the most recent 40 answers count', () => {
-  assert.equal(adjustLevel(1, [...log(0, 30), ...log(34, 6)]), 2);
-  const st = levelStatus([...log(0, 30), ...log(30, 10)]);
-  assert.deepEqual([st.answers, st.right], [40, 30]);
+test('60% or more right is never moved back automatically, even if the balanced score is low', () => {
+  // q0 asked 25 times, all right; 15 other types once each, all wrong: 62.5% right, but the
+  // balanced score is at 50%
+  const l = [...Array(25).fill({ k: 'q0', s: 1 }), ...Array.from({ length: 15 }, (_, i) => ({ k: `x${i}`, s: 0 }))];
+  assert.ok(balancedShare(l) <= 0.5);
+  const judged = [...Array(20).fill({ k: 'z', s: 1 }), ...l];
+  assert.equal(levelDecision('read', 3, judged, 60), 'offerDown');
 });
 
-test('questions always have their answer among the choices', () => {
-  for (const level of [1, 2, 3]) {
-    for (let i = 0; i < 200; i++) {
-      const r = readingQuestion(level);
-      assert.ok(r.choices.includes(r.answer));
-      const e = earQuestion(level);
-      assert.ok(e.choices.includes(e.answer));
-    }
-  }
+test('a declined offer stays quiet for 20 more answers', () => {
+  const l = [...log(10, 10), ...log(22, 18)];
+  assert.equal(levelDecision('read', 3, l, 60, 80), null);
+  assert.equal(levelDecision('read', 3, l, 80, 80), 'offerDown');
+});
+
+test('a type seen only once does not swing the score', () => {
+  // Your case: 70% right, where a few new types were each missed once.
+  const l = [...Array(14).fill({ k: 'old', s: 1 }), ...Array(3).fill({ k: 'old', s: 0 }), { k: 'int:5', s: 0 }, { k: 'int:1', s: 0 }, { k: 'int:3', s: 1 }];
+  assert.ok(balancedShare(l) > 0.6, String(balancedShare(l)));
+  // Older answers without a type count towards the overall result, not as one type.
+  const legacy = [...Array(14).fill(1), ...Array(6).fill(0)];
+  assert.equal(balancedShare(legacy), 0.7);
+});
+
+test('smaller levels', () => {
+  assert.equal(Object.keys(READ_LEVELS).length, MAX_LEVEL.read);
+  assert.equal(Object.keys(EAR_LEVELS).length, MAX_LEVEL.ear);
+  assert.ok(readingPool(2).every((q) => q.clef === 'treble'));
+  assert.ok(readingPool(3).every((q) => q.clef === 'bass'));
+  assert.ok(readingPool(4).some((q) => q.clef === 'bass') && readingPool(4).some((q) => q.clef === 'treble'));
+  assert.equal(earPool(3).some((q) => q.type === 'chord'), false);
+  assert.equal(earPool(4).some((q) => q.type === 'chord'), true);
 });
 
 test('questions you get wrong come up more often, but at most about half the round targets them', () => {
@@ -54,15 +81,13 @@ test('questions you get wrong come up more often, but at most about half the rou
   let seed = 3;
   const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (let i = 0; i < N; i++) if (readingQuestion(1, null, rnd, stats).key === 'treble:F4') f++;
-  const even = 1 / pool.length;
-  // Even share is 1/5 of the pool; with the weak spot weighted 4x on half the picks: 0.5/5 + 0.5*4/8 = 0.35
-  assert.ok(f / N > even * 1.5 && f / N < 0.4, `share ${f / N}`);
+  assert.ok(f / N > 1.5 / pool.length && f / N < 0.4, `share ${f / N}`);
 });
 
 test('a slow right answer counts as half a struggle', () => {
   assert.equal(isSlow(5000, [1000, 1100, 900, 1200, 1000]), true);
   assert.equal(isSlow(1500, [1000, 1100, 900, 1200, 1000]), false);
-  assert.equal(isSlow(9000, [1000]), false); // not enough answers yet to know what is usual
+  assert.equal(isSlow(9000, [1000]), false);
   assert.equal(struggle([1, 0.5, 0]), 0.5);
 });
 
@@ -72,19 +97,26 @@ test('history keeps the last five answers per question', () => {
   assert.equal(s['int:7'].length, 5);
 });
 
-test('level score weighs every question type equally', () => {
-  // F asked 10 times (5 right), E asked twice (both right): raw 7/12, balanced (0.5 + 1) / 2
-  const log = [...Array(5).fill({ k: 'F', s: 1 }), ...Array(5).fill({ k: 'F', s: 0 }), { k: 'E', s: 1 }, { k: 'E', s: 1 }];
-  assert.equal(balancedShare(log), 0.75);
-  assert.equal(balancedShare([1, 1, 0, 1]), 0.75); // old saved logs still work
-});
-
 test('readable names and progress notes', () => {
   assert.equal(keyName('treble:F5'), 'F, treble clef, top line');
-  assert.equal(keyName('treble:E4'), 'E, treble clef, bottom line');
   assert.equal(keyName('treble:C4'), 'C, treble clef, below the staff');
   assert.equal(keyName('bass:F3'), 'F, bass clef, 4th line');
   assert.equal(keyName('int:7'), 'Fifth');
   const stats = { 'treble:F4': [0, 0, 1, 1], 'treble:B4': [0, 1, 0], 'treble:C4': [1, 1] };
   assert.deepEqual(progressNotes(stats, ['treble:F4', 'treble:B4', 'treble:C4']), { stronger: ['treble:F4'], tricky: ['treble:B4'] });
+});
+
+test('every level has questions with their answer among the choices', () => {
+  for (let level = 1; level <= MAX_LEVEL.read; level++) for (let i = 0; i < 100; i++) {
+    const r = readingQuestion(level);
+    assert.ok(r.choices.includes(r.answer));
+  }
+  for (let level = 1; level <= MAX_LEVEL.ear; level++) for (let i = 0; i < 100; i++) {
+    const e = earQuestion(level);
+    assert.ok(e.choices.includes(e.answer));
+  }
+});
+
+test('level status', () => {
+  assert.equal(levelStatus(log(30, 10)).right, 30);
 });

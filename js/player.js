@@ -15,6 +15,10 @@ const defaultStall = () => {
   setTimeout(() => t.classList.remove('show'), 4000);
 };
 
+// Every player on screen, so they can all be stopped when the app goes into the background.
+const players = new Set();
+export function stopAllPlayers() { for (const p of players) p.stop(); }
+
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true, metronome = true, fingers = true, once = false, onPass, onState, onEnd, onPosition, onStall = defaultStall }) {
@@ -459,7 +463,7 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
 
   mount();
 
-  return {
+  const api = {
     play,
     stop,
     toggle: () => (playing ? stop() : play()),
@@ -476,6 +480,8 @@ export function createPlayer({ item, stage, bpm, view, hands = 'B', guide = true
     position,
     scoring,
     hasBothHands: () => !!p.rh && !!p.lh,
-    destroy: () => { stop(); destroyed = true; ro.disconnect(); stage.innerHTML = ''; },
+    destroy: () => { stop(); destroyed = true; ro.disconnect(); stage.innerHTML = ''; players.delete(api); },
   };
+  players.add(api);
+  return api;
 }

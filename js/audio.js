@@ -7,6 +7,21 @@ let master = null;
 let wave = null;
 let silentEl = null;
 let notesOut = null; // piano notes go here: dry to the master, plus a little room reverb
+const newContextHooks = new Set();
+export const onNewContext = (cb) => newContextHooks.add(cb);
+
+// Start a completely fresh audio engine. iOS can leave a web app's audio silent after the app has
+// been in the background, even when it reports that it is running again; a new engine always
+// works. Must be called from a tap. The loaded piano recordings are kept.
+function freshContext() {
+  const old = ctx;
+  ctx = null;
+  live.clear();
+  if (old) old.close().catch(() => {});
+  audio();
+  ctx.resume().catch(() => {});
+  for (const cb of newContextHooks) { try { cb(ctx); } catch { /* keep going */ } }
+}
 
 export function audio() {
   if (!ctx) {
@@ -77,12 +92,24 @@ export async function unlock(recording = false) {
   return ctx;
 }
 
-// Any tap in the app counts as permission to restart paused audio, so a notification sound or a
-// call never leaves the app silent: the next tap brings the sound back.
+// Any tap in the app brings the sound back: after the app has been in the background, the first
+// tap starts a fresh audio engine; otherwise a paused one (a notification, a call) is restarted.
+let wasHidden = false;
 if (typeof document !== 'undefined') {
-  const wake = () => { if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {}); };
+  const wake = () => {
+    if (!ctx) return;
+    if (wasHidden || ctx.state === 'closed') {
+      wasHidden = false;
+      freshContext();
+    } else if (ctx.state !== 'running') {
+      ctx.resume().catch(() => {});
+    }
+  };
   for (const ev of ['touchend', 'click', 'keydown']) document.addEventListener(ev, wake, { capture: true, passive: true });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) wasHidden = true;
+    else if (ctx && ctx.state !== 'running') ctx.resume().catch(() => {});
+  });
 }
 
 // iOS can pause ("interrupt") the audio at any time, e.g. after a change of audio mode or a call.

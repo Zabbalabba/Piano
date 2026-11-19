@@ -1,6 +1,6 @@
 // How the app hears you: MIDI keyboard, microphone, or not at all.
 
-import { audio } from './audio.js';
+import { audio, onNewContext } from './audio.js';
 import { hann, rms, notePresent } from './detect.js';
 
 const state = { mode: 'none', midi: null, stream: null, analyser: null, source: null, buf: null, win: null, winAt: -1 };
@@ -46,13 +46,7 @@ export async function startInput(mode) {
       state.stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
-      const ctx = audio();
-      state.source = ctx.createMediaStreamSource(state.stream);
-      state.analyser = ctx.createAnalyser();
-      state.analyser.fftSize = 8192;
-      state.analyser.smoothingTimeConstant = 0;
-      state.source.connect(state.analyser);
-      state.buf = new Float32Array(state.analyser.fftSize);
+      connectMic(audio());
       state.mode = 'mic';
       return { ok: true, message: 'Microphone is on.' };
     } catch {
@@ -62,6 +56,18 @@ export async function startInput(mode) {
   state.mode = 'none';
   return { ok: true, message: '' };
 }
+
+function connectMic(ctx) {
+  state.source = ctx.createMediaStreamSource(state.stream);
+  state.analyser = ctx.createAnalyser();
+  state.analyser.fftSize = 8192;
+  state.analyser.smoothingTimeConstant = 0;
+  state.source.connect(state.analyser);
+  state.buf = new Float32Array(state.analyser.fftSize);
+  state.winAt = -1;
+}
+// When the audio engine is replaced (after the app was in the background), reconnect the microphone.
+onNewContext((ctx) => { if (state.mode === 'mic' && state.stream) connectMic(ctx); });
 
 export function stopInput() {
   if (state.midi) for (const i of state.midi.inputs.values()) i.onmidimessage = null;

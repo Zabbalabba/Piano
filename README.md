@@ -18,11 +18,12 @@ and installs to a phone's home screen.
 - **Too hard for now?** sets an exercise aside for a couple of sessions and puts the step before it in
   its place. After two Hard ratings in a row, the app offers this itself.
 - **Every exercise explains itself**: what it is, what it does for you, and how to practise it.
-- **Ear training and note reading**: choose the number of questions (steps of 5). Levels are reviewed
-  over your last 40 answers at that level (85% right is ready to move up, under 60% moves back), or
-  from 20 answers on at 90% / 50%. Moving up is offered, and you can decline.
-  Notes and intervals you get wrong (or, in note reading, answer much more slowly than usual) come
-  up more often, and the level score counts every note or interval equally.
+- **Ear training and note reading**: choose the number of questions (steps of 5). Small levels (five
+  for reading, four for ear). Moving up is offered at 85% over your last 40 answers at a level (90%
+  from 20 on), and you can decline. The first 20 answers after a level change never count against
+  you; after that a step back is offered under 60%, and only happens automatically at 50% or less
+  with under 60% of answers right. Every note or interval counts equally in the score, and ones you
+  get wrong (or, in note reading, answer much more slowly than usual) come up more often.
 - **No tempo limit**: play as fast as you can, and progress follows.
 - **Skill check** at setup (note reading, ear, sight-reading passages and a speed check on real exercises), **ear training** and **note reading** as optional extras or on their own.
 - **Progress** centred on a weekly goal rather than a daily streak.
