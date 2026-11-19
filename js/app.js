@@ -465,8 +465,9 @@ function askQuestion({ kind, q, header, skip, onSkip, onAnswer, progressText = '
       el.classList.add(right ? 'right' : 'wrong');
       if (!right) $app.querySelectorAll('.answer').forEach((b) => { if (b.dataset.v === q.answer) b.classList.add('right'); });
       if (kind === 'read') {
-        await unlock();
-        playNote(noteToMidi(q.note), audio().currentTime + 0.02, 0.8);
+        // Play the correct note (never the one you tapped), straight from the tap so iOS allows it.
+        unlock();
+        playNote(noteToMidi(q.note), audio().currentTime + 0.01, 1.4, 0.85, 0.3);
       }
       const ms = performance.now() - shownAt;
       setTimeout(() => onAnswer(right, ms), right ? 650 : 1500);
