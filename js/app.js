@@ -10,7 +10,7 @@ import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from '
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
 import { createPlayer } from './player.js';
 import { renderSheet, renderNote } from './sheet.js';
-import { readingQuestion, earQuestion, adjustLevel, READ_LEVELS, EAR_LEVELS } from './quiz.js';
+import { readingQuestion, earQuestion, adjustLevel, levelStatus, READ_LEVELS, EAR_LEVELS, LEVEL_WINDOW } from './quiz.js';
 
 const KEY = 'piano.v1';
 const $app = document.getElementById('app');
@@ -471,45 +471,86 @@ function askQuestion({ kind, q, header, skip, onSkip, onAnswer, progressText = '
   }
 }
 
-// Ten questions of reading or ear training. Calls done(minutes).
+// Reading or ear training. You choose how many questions first (in steps of 5). Calls done(minutes, quit).
 function runQuiz(kind, done) {
-  const total = 10;
-  const started = Date.now();
-  let i = 0;
-  let right = 0;
-  let last = null;
   const key = kind === 'read' ? 'read' : 'ear';
   const title = kind === 'read' ? 'Note reading' : 'Ear training';
-  const ask = () => {
-    if (i >= total) {
-      const minutes = Math.min(10, (Date.now() - started) / 60000);
-      save();
-      return show(`<main class="page center"><h1>${right} of ${total}</h1>
-        <p class="lead">${title} · ${kind === 'read' ? READ_LEVELS[S.profile.level.read] : EAR_LEVELS[S.profile.level.ear]}</p>
-        <div class="foot"><button class="btn primary" data-act="ok">Done</button></div></main>`, { ok: () => done(minutes) });
-    }
-    const level = S.profile.level[key];
-    const q = kind === 'read' ? readingQuestion(level, last) : earQuestion(level);
-    last = q;
-    askQuestion({
-      kind, q,
-      header: `<div class="topbar"><button class="icon-btn" data-act="quit" aria-label="Close">✕</button><b>${title}</b><span>${i + 1} / ${total}</span></div>`,
-      onAnswer: (ok) => {
-        i += 1;
-        if (ok) right += 1;
-        S.quiz[key].push(ok ? 1 : 0);
-        const next = adjustLevel(level, S.quiz[key]);
-        if (next !== level) {
-          S.profile.level[key] = next;
-          S.quiz[key] = [];
-          toast(next > level ? 'Level up. The questions get a little harder.' : 'Stepping back a level to make this solid.');
-        }
-        ask();
+  const levelName = () => (kind === 'read' ? READ_LEVELS : EAR_LEVELS)[S.profile.level[key]];
+  let total = S.settings.quizCount || 10;
+
+  const choose = () => {
+    show(`<main class="page picker">
+      <div class="topbar"><button class="icon-btn" data-act="back" aria-label="Back">✕</button><b>${title}</b><span></span></div>
+      <p class="lead center-text">Level ${S.profile.level[key]} · ${levelName()}</p>
+      <div class="stepper">
+        <button class="round" data-act="less" ${total <= 5 ? 'disabled' : ''} aria-label="Five fewer">−</button>
+        <div class="big-num">${total}<small>questions</small></div>
+        <button class="round" data-act="more" ${total >= 100 ? 'disabled' : ''} aria-label="Five more">+</button>
+      </div>
+      ${chips('set', [5, 10, 20, 30, 40], total)}
+      <p class="note center-text">About ${Math.max(1, Math.round(total * (kind === 'read' ? 0.12 : 0.2)))} min.</p>
+      <div class="foot"><button class="btn primary big" data-act="start">Start</button></div>
+    </main>`, {
+      back: () => done(0, true),
+      less: () => { total = Math.max(5, total - 5); choose(); },
+      more: () => { total = Math.min(100, total + 5); choose(); },
+      set: (el) => { total = Number(el.dataset.v); choose(); },
+      start: async () => {
+        S.settings.quizCount = total;
+        save();
+        await unlock();
+        run();
       },
     });
-    actions.quit = () => done((Date.now() - started) / 60000, true);
   };
-  ask();
+
+  const run = () => {
+    const started = Date.now();
+    let i = 0;
+    let right = 0;
+    let last = null;
+    let moved = 0;
+    const ask = () => {
+      if (i >= total) {
+        const minutes = Math.min(total * 0.5, (Date.now() - started) / 60000);
+        save();
+        const st = levelStatus(S.quiz[key]);
+        const lvl = S.profile.level[key];
+        const where = moved > 0 ? `You moved up to level ${lvl}. Your count starts fresh at this level.`
+          : moved < 0 ? `You moved back to level ${lvl} to make it solid. Your count starts fresh here.`
+          : st.answers < 20 ? `${st.answers} answers at this level so far. The level is first reviewed after 20, if the result is very clear, and otherwise after ${LEVEL_WINDOW}.`
+          : `${st.right} of your last ${st.answers} right (${Math.round(st.share * 100)}%). 90% or more over ${LEVEL_WINDOW} answers moves you up; under 60% moves you back.`;
+        return show(`<main class="page center"><h1>${right} of ${total}</h1>
+          <p class="lead">${title} · level ${lvl} · ${levelName()}</p>
+          <div class="card"><p class="muted">${where}</p></div>
+          <div class="foot"><button class="btn primary" data-act="ok">Done</button></div></main>`, { ok: () => done(minutes) });
+      }
+      const level = S.profile.level[key];
+      const q = kind === 'read' ? readingQuestion(level, last) : earQuestion(level);
+      last = q;
+      askQuestion({
+        kind, q,
+        header: `<div class="topbar"><button class="icon-btn" data-act="quit" aria-label="Close">✕</button><b>${title}</b><span>${i + 1} / ${total}</span></div>`,
+        onAnswer: (ok) => {
+          i += 1;
+          if (ok) right += 1;
+          S.quiz[key] = [...S.quiz[key], ok ? 1 : 0].slice(-LEVEL_WINDOW);
+          const next = adjustLevel(level, S.quiz[key]);
+          if (next !== level) {
+            S.profile.level[key] = next;
+            S.quiz[key] = [];
+            moved = next - level;
+            toast(next > level ? 'Level up. The questions get a little harder.' : 'Stepping back a level to make this solid.');
+          }
+          save();
+          ask();
+        },
+      });
+      actions.quit = () => done((Date.now() - started) / 60000, true);
+    };
+    ask();
+  };
+  choose();
 }
 
 // ---------------------------------------------------------------- home
@@ -544,8 +585,8 @@ function home() {
     </section>
     <h2>Separate practice</h2>
     <div class="tiles">
-      <button class="tile" data-act="ear"><b>Ear training</b><small>10 questions</small></button>
-      <button class="tile" data-act="read"><b>Note reading</b><small>10 questions</small></button>
+      <button class="tile" data-act="ear"><b>Ear training</b><small>Level ${S.profile.level.ear}</small></button>
+      <button class="tile" data-act="read"><b>Note reading</b><small>Level ${S.profile.level.read}</small></button>
       <button class="tile" data-act="pieces"><b>Pieces</b><small>${S.profile.genres.length * 3} for your genres</small></button>
     </div>
   </main>${nav('home')}`, {
@@ -669,8 +710,8 @@ function summary() {
   const has = (t) => s.extras.includes(t);
   const extra = (type, label, sub) => `<button class="tile ${has(type) ? 'done' : ''}" data-act="extra" data-v="${type}"><b>${label}</b><small>${has(type) ? 'Done' : sub}</small></button>`;
   const tiles = [
-    m.ear ? extra('ear', 'Ear training', 'About 3 min') : '',
-    m.reading ? extra('read', 'Note reading', 'About 3 min') : '',
+    m.ear ? extra('ear', 'Ear training', 'Choose how many') : '',
+    m.reading ? extra('read', 'Note reading', 'Choose how many') : '',
     m.pieces && piece ? extra('piece', 'A piece', esc(piece.t)) : '',
   ].join('');
   if (s.done.length && !s.chimed) { s.chimed = true; try { chime(); } catch { /* no sound */ } }

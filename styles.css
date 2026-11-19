@@ -247,3 +247,4 @@ button:disabled { opacity: 0.4; cursor: default; }
 .link.tight { padding: 6px 4px 2px; grid-column: 1 / -1; font-size: 0.85rem; }
 .keys-canvas { touch-action: none; cursor: grab; }
 @media (orientation: landscape) and (max-height: 500px) { .ex-head .gain { display: none; } }
+.center-text { text-align: center; }

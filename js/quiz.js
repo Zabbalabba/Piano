@@ -78,11 +78,27 @@ export function earQuestion(level, rnd = Math.random) {
   };
 }
 
-// Move up a level after seven of the last eight answers were right; down after five wrong.
+// Level changes are based on your recent answers at the current level (answers from an earlier
+// level do not count). Normally the last 40 decide: 90% or more right moves you up, under 60%
+// moves you down. After 20, an unmistakable result moves you early: 95% or more up, 50% or less down.
+export const LEVEL_WINDOW = 40;
+export const EARLY_AFTER = 20;
+
 export function adjustLevel(level, log) {
-  const recent = log.slice(-8);
-  const right = recent.filter(Boolean).length;
-  if (recent.length === 8 && right >= 7 && level < 3) return level + 1;
-  if (recent.length === 8 && right <= 3 && level > 1) return level - 1;
+  const recent = log.slice(-LEVEL_WINDOW);
+  const n = recent.length;
+  const share = n ? recent.filter(Boolean).length / n : 0;
+  const full = n >= LEVEL_WINDOW;
+  if (n >= EARLY_AFTER) {
+    if (level < 3 && share >= (full ? 0.9 : 0.95)) return level + 1;
+    if (level > 1 && share < (full ? 0.6 : 0.5000001)) return level - 1;
+  }
   return level;
+}
+
+// Where you stand towards the next level review, for the results screen.
+export function levelStatus(log) {
+  const recent = log.slice(-LEVEL_WINDOW);
+  const right = recent.filter(Boolean).length;
+  return { answers: recent.length, right, share: recent.length ? right / recent.length : 0, window: LEVEL_WINDOW };
 }
