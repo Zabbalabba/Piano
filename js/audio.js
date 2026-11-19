@@ -77,6 +77,14 @@ export async function unlock(recording = false) {
   return ctx;
 }
 
+// Any tap in the app counts as permission to restart paused audio, so a notification sound or a
+// call never leaves the app silent: the next tap brings the sound back.
+if (typeof document !== 'undefined') {
+  const wake = () => { if (ctx && ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {}); };
+  for (const ev of ['touchend', 'click', 'keydown']) document.addEventListener(ev, wake, { capture: true, passive: true });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+}
+
 // iOS can pause ("interrupt") the audio at any time, e.g. after a change of audio mode or a call.
 // While the app wants sound, try to start it again straight away.
 let keepRunning = false;
