@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   levelDecision, levelStatus, readingQuestion, earQuestion, readingPool, earPool, recordAnswer, isSlow,
-  keyName, progressNotes, balancedShare, struggle, MAX_LEVEL, READ_LEVELS, EAR_LEVELS,
+  keyName, progressNotes, balancedShare, struggle, MAX_LEVEL, READ_LEVELS, EAR_LEVELS, READ_TIME_LIMIT,
 } from '../js/quiz.js';
 
 // Answers spread over a few question types, so the balanced score matches the raw share.
@@ -119,4 +119,55 @@ test('every level has questions with their answer among the choices', () => {
 
 test('level status', () => {
   assert.equal(levelStatus(log(30, 10)).right, 30);
+});
+
+const steps = (n) => 'CDEFGAB'.indexOf(n[0]) + 7 * Number(n.slice(-1));
+
+test('consecutive notes are at least a third apart, and every note still comes up', () => {
+  for (let level = 1; level <= MAX_LEVEL.read; level++) {
+    let last = null;
+    const seen = new Set();
+    for (let i = 0; i < 3000; i++) {
+      const q = readingQuestion(level, last);
+      if (last && q.clef === last.clef) assert.ok(Math.abs(steps(q.note) - steps(last.note)) >= 2, `${last.note} then ${q.note}`);
+      seen.add(q.key);
+      last = q;
+    }
+    assert.equal(seen.size, readingPool(level).length, `level ${level}`);
+  }
+});
+
+test('slow right answers count half towards the level', () => {
+  const quick = Array.from({ length: 20 }, (_, i) => ({ k: `n${i % 5}`, s: 1 }));
+  const slow = Array.from({ length: 20 }, (_, i) => ({ k: `n${i % 5}`, s: 0.5 }));
+  assert.equal(balancedShare(quick), 1);
+  assert.equal(balancedShare(slow), 0.5);
+  assert.equal(levelStatus(slow).slow, 20);
+  assert.ok(READ_TIME_LIMIT[1] > READ_TIME_LIMIT[5]);
+});
+
+test('ear questions start over a wide range and never on a note just heard', () => {
+  let last = null;
+  const starts = new Set();
+  for (let i = 0; i < 3000; i++) {
+    const q = earQuestion(3, Math.random, null, last);
+    const first = q.notes[0][0];
+    if (last) assert.ok(!last.notes.flat().includes(first));
+    starts.add(first);
+    last = q;
+  }
+  assert.ok(Math.min(...starts) <= 49 && Math.max(...starts) >= 71);
+});
+
+test('two notes never take turns, even when both are weak spots', () => {
+  let stats = {};
+  for (let i = 0; i < 5; i++) { stats = recordAnswer(stats, 'treble:F4', 0); stats = recordAnswer(stats, 'treble:D4', 0); }
+  let a = null;
+  let b = null;
+  for (let i = 0; i < 2000; i++) {
+    const q = readingQuestion(1, b, Math.random, stats);
+    if (a) assert.ok(q.key !== a.key || i < 2, `${a.key} ${b.key} ${q.key}`);
+    a = b;
+    b = q;
+  }
 });

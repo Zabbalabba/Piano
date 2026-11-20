@@ -24,6 +24,10 @@ and installs to a phone's home screen.
   you; after that a step back is offered under 60%, and only happens automatically at 50% or less
   with under 60% of answers right. Every note or interval counts equally in the score, and ones you
   get wrong (or, in note reading, answer much more slowly than usual) come up more often.
+  In note reading, consecutive notes are at least a third apart (never the note from two questions
+  back), and right answers slower than the level's time limit (3 s on level 1 down to 1.5 s on level
+  5) count half towards moving up. Ear questions start anywhere from C3 to C5, never on a note just
+  heard.
 - **No tempo limit**: play as fast as you can, and progress follows.
 - **New keys**: once you master a genre or foundation exercise, it returns (after a couple of sessions,
   and after new exercises) in a new key that suits the genre, up to three keys each, e.g. jazz in F,

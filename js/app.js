@@ -12,7 +12,7 @@ import { createPlayer, stopAllPlayers } from './player.js';
 import { renderSheet, renderNote } from './sheet.js';
 import {
   readingQuestion, earQuestion, levelDecision, levelStatus, READ_LEVELS, EAR_LEVELS, LEVEL_WINDOW, GRACE,
-  MAX_LEVEL, OLD_LEVELS,
+  MAX_LEVEL, OLD_LEVELS, READ_TIME_LIMIT,
   recordAnswer, isSlow, keyName, progressNotes,
 } from './quiz.js';
 
@@ -534,7 +534,7 @@ function runQuiz(kind, done) {
         <button class="round" data-act="more" ${total >= 100 ? 'disabled' : ''} aria-label="Five more">+</button>
       </div>
       ${chips('set', [5, 10, 20, 30, 40], total)}
-      <p class="note center-text">About ${Math.max(1, Math.round(total * (kind === 'read' ? 0.12 : 0.2)))} min.</p>
+      <p class="note center-text">About ${Math.max(1, Math.round(total * (kind === 'read' ? 0.12 : 0.2)))} min.${kind === 'read' ? ` Aim for under ${READ_TIME_LIMIT[lvl] / 1000} seconds a note: slower right answers count half towards your level.` : ''}</p>
       <div class="foot"><button class="btn primary big" data-act="start">Start</button></div>
     </main>`, {
       back: () => done(0, true),
@@ -574,7 +574,9 @@ function runQuiz(kind, done) {
       const st = levelStatus(S.quiz[key]);
       const count = S.quiz.count[key];
       const decision = moved ? null : decide();
-      const pct = `${st.right} of your last ${st.answers} right, ${Math.round(st.share * 100)}% with every ${kind === 'read' ? 'note' : 'question type'} counted equally`;
+      const pct = kind === 'read'
+        ? `${st.right} of your last ${st.answers} right${st.slow ? `, ${st.slow} of them slower than ${READ_TIME_LIMIT[lvl] / 1000} s (counted half)` : ''}: ${Math.round(st.share * 100)}% with every note counted equally`
+        : `${st.right} of your last ${st.answers} right, ${Math.round(st.share * 100)}% with every question type counted equally`;
       let card;
       if (decision === 'up') {
         card = `<div class="card levelup"><p><b>Ready for level ${lvl + 1}?</b> ${pct}. Next: ${esc(levelName(lvl + 1))}. If it felt like luck, stay a while longer.</p>
@@ -626,12 +628,14 @@ function runQuiz(kind, done) {
           i += 1;
           if (ok) right += 1;
           active += Math.min(60000, ms) + (ok ? 650 : 1500);
-          // A right but much slower than usual answer counts as half a struggle (note reading only).
-          const slow = kind === 'read' && ok && isSlow(ms, S.quiz.times.read);
+          // Note reading: a right answer over the time limit for this level counts as half right
+          // towards the level, and (like one much slower than your usual) as half a struggle.
+          const overLimit = kind === 'read' && ok && ms > READ_TIME_LIMIT[level];
+          const slow = overLimit || (kind === 'read' && ok && isSlow(ms, S.quiz.times.read));
           if (kind === 'read' && ok) S.quiz.times.read = [...S.quiz.times.read, Math.round(ms)].slice(-20);
           S.quiz.stats[key] = recordAnswer(S.quiz.stats[key], q.key, ok ? (slow ? 0.5 : 1) : 0);
           asked.push(q.key);
-          S.quiz[key] = [...S.quiz[key], { k: q.key, s: ok ? 1 : 0 }].slice(-LEVEL_WINDOW);
+          S.quiz[key] = [...S.quiz[key], { k: q.key, s: ok ? (overLimit ? 0.5 : 1) : 0 }].slice(-LEVEL_WINDOW);
           S.quiz.count[key] += 1;
           save();
           ask();

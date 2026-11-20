@@ -52,8 +52,23 @@ export function struggle(scores) {
 }
 const weight = (stats, key) => 1 + 3 * struggle(stats && stats[key]);
 
-function choose(pool, stats, last, rnd) {
-  const options = pool.length > 1 && last ? pool.filter((q) => q.key !== last.key) : pool;
+// allowed(q): an extra rule for which questions may follow the last one. If none qualify, the ones
+// furthest from it (by distance(q)) are used, so no question is ever left out for long.
+function choose(pool, stats, last, rnd, allowed = null, distance = null) {
+  let options = pool.length > 1 && last ? pool.filter((q) => q.key !== last.key) : pool;
+  // Not the question from two back either, so two questions never take turns (A, B, A, B).
+  if (last && last.prevKey) {
+    const fresh = options.filter((q) => q.key !== last.prevKey && (!allowed || allowed(q)));
+    if (fresh.length) options = options.filter((q) => q.key !== last.prevKey);
+  }
+  if (last && allowed) {
+    const ok = options.filter(allowed);
+    if (ok.length) options = ok;
+    else if (distance) {
+      const far = Math.max(...options.map(distance));
+      options = options.filter((q) => distance(q) === far);
+    }
+  }
   if (!stats || rnd() < TARGETED_SHARE) return pick(options, rnd);
   const total = options.reduce((a, q) => a + weight(stats, q.key), 0);
   let r = rnd() * total;
@@ -68,9 +83,21 @@ export function readingPool(level) {
   return READ_POOLS[level].flatMap(([clef, notes]) => notes.map((note) => ({ key: `${clef}:${note}`, clef, note })));
 }
 
+// Consecutive notes are at least a third apart on the staff (not on the neighbouring line or
+// space), so a note cannot be found by counting one step from the answer just shown. A note in the
+// other clef always counts as far apart.
+export const MIN_STAFF_STEPS = 2;
+const staffSteps = (note) => 'CDEFGAB'.indexOf(note[0]) + 7 * Number(note.slice(-1));
+const staffDistance = (a, b) => (a.clef !== b.clef ? 99 : Math.abs(staffSteps(a.note) - staffSteps(b.note)));
+
+// A right answer slower than this counts as half right towards your level: fluent reading means
+// recognising a note, not working it out. The limit tightens as you move up.
+export const READ_TIME_LIMIT = { 1: 3000, 2: 2500, 3: 2000, 4: 1750, 5: 1500 };
+
 export function readingQuestion(level, last, rnd = Math.random, stats = null) {
-  const q = choose(readingPool(level), stats, last, rnd);
-  return { ...q, answer: q.note[0], choices: LETTERS };
+  const q = choose(readingPool(level), stats, last, rnd,
+    (c) => staffDistance(c, last) >= MIN_STAFF_STEPS, (c) => staffDistance(c, last));
+  return { ...q, answer: q.note[0], choices: LETTERS, prevKey: last ? last.key : null };
 }
 
 const INTERVALS = {
@@ -92,8 +119,12 @@ export function earPool(level) {
   return pool;
 }
 
+// Ear questions start anywhere from C3 to C5, and never on a note of the previous question, so
+// you cannot simply compare with what you just heard.
 export function earQuestion(level, rnd = Math.random, stats = null, last = null) {
-  const base = 55 + Math.floor(rnd() * 12);
+  const heard = new Set(last && last.notes ? last.notes.flat() : []);
+  let base = 48 + Math.floor(rnd() * 25);
+  for (let i = 0; i < 20 && heard.has(base); i++) base = 48 + Math.floor(rnd() * 25);
   const q = choose(earPool(level), stats, last, rnd);
   if (q.type === 'hl') {
     const gap = q.gap * (rnd() < 0.5 ? 1 : -1);
@@ -191,17 +222,20 @@ const PRIOR = 3;
 // Log entries are { k: key, s: 1 or 0 }. Older saved logs hold plain 1 and 0: those count towards
 // your overall result but not as a question type of their own.
 const entry = (x) => (typeof x === 'number' ? { k: null, s: x } : x);
+// Share of answers right at all (slow ones included), used as the guard against moving back.
 export const rawShare = (log) => (log.length ? log.map(entry).filter((x) => x.s > 0).length / log.length : 0);
+// Points: 1 for right, 0.5 for right but slow, 0 for wrong.
+const points = (log) => (log.length ? log.map(entry).reduce((a, x) => a + x.s, 0) / log.length : 0);
 
 export function balancedShare(log) {
   const list = log.map(entry);
   if (!list.length) return 0;
-  const overall = rawShare(list);
+  const overall = points(list);
   const byKey = new Map();
   for (const x of list) {
     if (x.k === null) continue;
     const v = byKey.get(x.k) || [0, 0];
-    byKey.set(x.k, [v[0] + (x.s > 0 ? 1 : 0), v[1] + 1]);
+    byKey.set(x.k, [v[0] + x.s, v[1] + 1]);
   }
   if (!byKey.size) return overall;
   let sum = 0;
@@ -229,6 +263,8 @@ export function levelDecision(kind, level, log, count = log.length, quietUntil =
 // Where you stand, for the results screen.
 export function levelStatus(log) {
   const recent = log.slice(-LEVEL_WINDOW);
-  const right = recent.map(entry).filter((x) => x.s > 0).length;
-  return { answers: recent.length, right, share: balancedShare(recent), window: LEVEL_WINDOW };
+  const list = recent.map(entry);
+  const right = list.filter((x) => x.s > 0).length;
+  const slow = list.filter((x) => x.s > 0 && x.s < 1).length;
+  return { answers: recent.length, right, slow, share: balancedShare(recent), window: LEVEL_WINDOW };
 }
