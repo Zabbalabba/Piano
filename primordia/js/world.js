@@ -136,7 +136,12 @@ export class World {
     for (const u of start.unlocks || []) this.progress.unlocked.add(u);
     const sp = this.species.create({ name: speciesName, genome: start.genome, isPlayer: true });
     this.playerSpecies = sp;
-    const p = this.env.randomPointIn(start.biome, this.rng);
+    // Start somewhere the starting body can survive without taking damage.
+    const startPh = phenotype(start.genome);
+    let p = this.env.randomPointIn(start.biome, this.rng);
+    for (let i = 0; i < 60 && envStress(startPh, this.env.sample(p.x, p.y, {})).total > 0; i++) {
+      p = this.env.randomPointIn(start.biome, this.rng);
+    }
     // A fair start: move nearby predators somewhere else.
     for (const o of this.cells) {
       if (o.ph.bite > 0 && Math.hypot(o.x - p.x, o.y - p.y) < 500) {
