@@ -1,7 +1,8 @@
 // Genomes describe a cell's body. phenotype() turns a genome into the numbers
 // the simulation uses, so every editor choice has a concrete effect.
 
-import { PARTS, PART_IDS, EXTERNAL_IDS, INTERNAL_IDS, MAX_EXTERNAL, MAX_INTERNAL } from './parts.js';
+import { PARTS, PART_IDS, EXTERNAL_IDS, INTERNAL_IDS, MAX_EXTERNAL, MAX_INTERNAL, MAX_EYES } from './parts.js';
+import { sightProfile } from './vision.js';
 import { clamp, diminish, TAU, angleDiff } from './util.js';
 
 export const SIZE_MIN = 0.6;
@@ -28,6 +29,10 @@ export function countParts(g) {
   return c;
 }
 
+export function eyeCount(g) {
+  return g.parts.filter((p) => PARTS[p.t].eye).length;
+}
+
 export function externalCount(g) {
   return g.parts.filter((p) => PARTS[p.t].ext).length;
 }
@@ -38,6 +43,7 @@ export function internalCount(g) {
 export function canAddPart(g, t) {
   const c = countParts(g);
   if (c[t] >= PARTS[t].max) return false;
+  if (PARTS[t].eye && eyeCount(g) >= MAX_EYES) return false;
   if (PARTS[t].ext ? externalCount(g) >= MAX_EXTERNAL : internalCount(g) >= MAX_INTERNAL) return false;
   return true;
 }
@@ -87,7 +93,6 @@ export function phenotype(g) {
     maxEnergy,
     upkeep,
     moveCost: 0.0032,
-    vision: 130 + diminish(c.eyespot, 130, 0.7) + 15 * s,
     tMin,
     tMax,
     uvTol: 0.4 + diminish(c.pigment, 0.3, 0.75),
@@ -104,6 +109,8 @@ export function phenotype(g) {
     growthNeeded: 24 * area + 3 * nParts,
     membraneDR: 0.3 * g.membrane,
   };
+  ph.sight = sightProfile(g);
+  ph.vision = ph.sight.max;
   ph.diet = dietLabel(ph);
   ph.topSpeed = (ph.fwdThrust + ph.ciliaThrust) / ph.mass / 1.6;
   return ph;
@@ -143,7 +150,7 @@ const MUTATION_PART_WEIGHTS = {
   spike: 0.9,
   armor: 0.9,
   toxin: 0.4,
-  eyespot: 0.8,
+  eyespot: 1.1,
   chloroplast: 1,
   chemosynth: 0.6,
   mitochondrion: 0.8,
@@ -161,9 +168,18 @@ const MUTATION_PART_WEIGHTS = {
  */
 export function mutateGenome(g, rng, bias = null) {
   const m = cloneGenome(g);
+  // Occasionally an existing eye evolves to the next tier.
+  const upgradable = m.parts.filter((p) => PARTS[p.t].evolvesTo);
+  if (upgradable.length && rng.chance(0.08 * (1 + (bias?.eyes || 0)))) {
+    const p = rng.pick(upgradable);
+    const next = PARTS[p.t].evolvesTo;
+    if ((countParts(m)[next] || 0) < PARTS[next].max) p.t = next;
+    m.hue = (m.hue + rng.float(-3, 3) + 360) % 360;
+    return m;
+  }
   const roll = rng.next();
   if (roll < 0.34) {
-    const opts = PART_IDS.filter((id) => canAddPart(m, id)).map((id) => ({
+    const opts = PART_IDS.filter((id) => canAddPart(m, id) && !PARTS[id].evolvesFrom).map((id) => ({
       id,
       w: (MUTATION_PART_WEIGHTS[id] || 0.5) * (1 + (bias?.[id] || 0)),
     }));
@@ -207,10 +223,10 @@ export function normAngle(a) {
 export function placeAngleFor(t, g, rng = null) {
   const def = PARTS[t].defaultAngle ?? 0;
   if (!PARTS[t].ext) return rng ? rng.float(-Math.PI, Math.PI) : 0;
-  const same = g.parts.filter((p) => p.t === t);
+  const same = g.parts.filter((p) => (PARTS[t].eye ? PARTS[p.t].eye : p.t === t));
   // Mirror pairs (left/right) look and steer better than stacking.
   const candidates =
-    t === 'eyespot'
+    PARTS[t].eye && t !== 'ocelloid'
       ? [0.5, -0.5, 1.1, -1.1, 0, 1.7, -1.7]
       : [0, 0.45, -0.45, 0.9, -0.9, 1.35, -1.35, 1.8, -1.8].map((o) => def + o);
   for (const c of candidates) {
@@ -240,7 +256,8 @@ export function epithetFor(g, rng) {
   if (c.chemosynth >= 1) opts.push('sulfuricus', 'abyssalis');
   if (c.antifreeze >= 1) opts.push('glacialis', 'frigidus', 'borealis');
   if (c.heatshock >= 1) opts.push('thermophilus', 'calidus');
-  if (c.eyespot >= 2) opts.push('oculatus', 'argus');
+  if (c.eyespot + c.eyecup + c.ocelloid >= 2) opts.push('oculatus', 'argus');
+  if (c.ocelloid >= 1) opts.push('perspicax', 'lynceus');
   if (c.toxin >= 1) opts.push('toxicus', 'venenosus');
   if (c.flagellum >= 2) opts.push('velox', 'celer');
   if (c.cilia >= 3) opts.push('ciliatus', 'hirsutus');
@@ -357,7 +374,7 @@ export const FOUNDERS = [
         { t: 'jaw', a: 0 },
         { t: 'flagellum', a: P },
         { t: 'flagellum', a: P * 0.8 },
-        { t: 'eyespot', a: 0.5 },
+        { t: 'eyecup', a: 0.5 },
       ],
     }),
   },
@@ -423,7 +440,7 @@ export const FOUNDERS = [
       parts: [
         { t: 'filter', a: 0 },
         { t: 'jaw', a: 0.4 },
-        { t: 'eyespot', a: 0.6 },
+        { t: 'eyecup', a: 0.6 },
         { t: 'eyespot', a: -0.6 },
         { t: 'flagellum', a: P },
         { t: 'antifreeze' },

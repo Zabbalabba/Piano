@@ -129,20 +129,17 @@ export class Pressures {
       part('spike', pred * 4, `You were attacked ${dirText || 'often'}. A spike there punishes attackers.`, dirAngle);
       part('toxin', pred * 2.5, 'Predators kept attacking. A toxin gland can drive them off.', Math.PI);
       part('flagellum', pred * 2 + f('chased') * 2, 'You were chased often. More thrust means faster escapes.', Math.PI);
-      part('eyespot', pred * 1.5, 'Attacks came without warning. Eyespots let you see danger sooner.');
     }
     const starve = f('starve');
     part('vacuole', starve * 4, `You were close to starving ${pct('starve')} of the time. Storage would buffer lean stretches.`);
     if (c.chloroplast < 3) part('chloroplast', f('light') * (1.2 + starve * 3), `You spent ${pct('light')} of this generation in well-lit water.`);
     if (c.chemosynth < 2) part('chemosynth', f('sulfur') * (1.5 + starve * 3), `You spent ${pct('sulfur')} of this generation in sulfur-rich water.`);
     part('mitochondrion', f('oxygen') * 1.6, `Oxygen was plentiful ${pct('oxygen')} of the time. Mitochondria would use it to save energy.`);
-    part('eyespot', f('dark') * 1.4, `You spent ${pct('dark')} of this generation in dark water, where you can barely see.`);
     if (c.jaw === 0) part('jaw', f('preyNear') * 1.8 + starve, 'Smaller cells were often within reach. A jaw would let you eat them.', 0);
     if (c.filter === 0) part('filter', starve * 2, 'You struggled to find food you could digest.', 0);
     part('cilia', 0.35, 'A spontaneous mutation.');
     part('flagellum', 0.3, 'A spontaneous mutation.', Math.PI);
     part('spike', 0.2, 'A spontaneous mutation.');
-    part('eyespot', 0.25, 'A spontaneous mutation.');
     part('vacuole', 0.2, 'A spontaneous mutation.');
 
     if (genome.size < SIZE_MAX - 0.1)
@@ -161,15 +158,56 @@ export class Pressures {
 
     const offers = [];
     const used = new Set();
+    // Sight: an eye offer is guaranteed until the lineage can tell threats from
+    // prey (eye cup), so decent vision never takes long. After that it competes.
+    const eye = this.eyeOffer(genome, pred, f('dark'), pct('dark'));
+    if (eye) {
+      if (eye.guaranteed) {
+        offers.push(decorate(eye, genome));
+        used.add(eye.part || eye.to);
+      } else pool.push(eye);
+    }
     while (offers.length < count && pool.length) {
       const pick = rng.weighted(pool);
       pool.splice(pool.indexOf(pick), 1);
-      const key = pick.kind === 'part' ? pick.part : pick.kind + pick.delta;
+      const key = pick.kind === 'part' ? pick.part : pick.kind === 'upgrade' ? pick.to : pick.kind + pick.delta;
       if (used.has(key)) continue;
       used.add(key);
       offers.push(decorate(pick, genome));
     }
     return offers;
+  }
+
+  /** The next step for this lineage's eyes, or null. */
+  eyeOffer(genome, pred, dark, darkPct) {
+    const eyes = genome.parts.filter((p) => PARTS[p.t].eye);
+    const clarity = eyes.reduce((m, p) => Math.max(m, PARTS[p.t].tier), 0);
+    const w = 0.6 + pred * 2 + dark * 1.5;
+    const guaranteed = clarity < 2;
+    if (clarity === 0) {
+      if (!canAddPart(genome, 'eyespot')) return null;
+      const reason =
+        pred > 0.02
+          ? 'Attacks came without warning. A patch of light-sensitive pigment would let you see shapes coming.'
+          : dark > 0.2
+            ? `You spent ${darkPct} of this generation in dark water, where you can barely see.`
+            : 'Light-sensitive pigment gathered on your membrane. You would see the shapes of other cells.';
+      return { kind: 'part', part: 'eyespot', w, reason, angle: 0.5, guaranteed };
+    }
+    // Upgrade the best eye so clarity rises.
+    const counts = countParts(genome);
+    const best = eyes
+      .filter((p) => PARTS[p.t].evolvesTo && counts[PARTS[p.t].evolvesTo] < PARTS[PARTS[p.t].evolvesTo].max)
+      .sort((a, b) => PARTS[b.t].tier - PARTS[a.t].tier)[0];
+    if (!best) return null;
+    const to = PARTS[best.t].evolvesTo;
+    const reason =
+      to === 'eyecup'
+        ? pred > 0.02
+          ? 'Hunters looked just like harmless cells. A cupped eye senses direction and tells them apart.'
+          : 'Your eyespot folded into a shallow cup, so it can sense where light comes from.'
+        : 'A clear lens formed over your eye cup, focusing a sharp image onto it.';
+    return { kind: 'upgrade', from: best.t, to, angle: best.a, w, reason, guaranteed: guaranteed && to === 'eyecup' };
   }
 
   favouriteBiome() {
@@ -185,6 +223,9 @@ function decorate(o, genome) {
     const p = PARTS[o.part];
     const angle = p.ext ? o.angle ?? placeAngleFor(o.part, genome) : 0;
     return { ...o, angle, title: p.name, effect: p.effect, cat: p.cat };
+  }
+  if (o.kind === 'upgrade') {
+    return { ...o, title: PARTS[o.to].name, effect: `${PARTS[o.from].name} evolves: ${PARTS[o.to].effect}`, cat: 'Senses' };
   }
   if (o.kind === 'size') {
     return { ...o, title: o.delta > 0 ? 'Gigantism' : 'Dwarfism', effect: `${o.delta > 0 ? '+' : '−'}15% body size`, cat: 'Body' };

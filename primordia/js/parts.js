@@ -91,17 +91,53 @@ export const PARTS = {
     desc: 'Releases a poison cloud (E / Space) that hurts other species. Cells with sulfur tolerance resist it.',
     effect: 'poison cloud ability',
   },
+  // Eyes evolve in tiers: eyespot → eye cup → ocelloid. Each tier sees farther
+  // and more clearly in the direction it faces (see js/vision.js).
   eyespot: {
     name: 'Eyespot',
     cat: 'Senses',
     ext: true,
-    dna: 12,
-    upkeep: 0.03,
+    eye: true,
+    tier: 1,
+    dna: 8,
+    upkeep: 0.02,
     max: 4,
-    arc: 2.1,
+    arc: 2.3,
     defaultAngle: 0.5,
-    desc: 'A light-sensitive patch. Widens how far you can see; matters most in dark water.',
-    effect: '+ vision range',
+    evolvesTo: 'eyecup',
+    desc: 'A light-sensitive patch of pigment. You see the shapes of other cells, and farther in the direction it faces. Can evolve into an eye cup.',
+    effect: '+ sight, see shapes',
+  },
+  eyecup: {
+    name: 'Eye Cup',
+    cat: 'Senses',
+    ext: true,
+    eye: true,
+    tier: 2,
+    dna: 18,
+    upkeep: 0.035,
+    max: 4,
+    arc: 2.0,
+    defaultAngle: 0.5,
+    evolvesFrom: 'eyespot',
+    evolvesTo: 'ocelloid',
+    desc: 'An eyespot folded into a cup, so it can tell where light comes from. Sees much farther and lets you tell threats from prey.',
+    effect: '++ sight, threat vs prey',
+  },
+  ocelloid: {
+    name: 'Ocelloid',
+    cat: 'Senses',
+    ext: true,
+    eye: true,
+    tier: 3,
+    dna: 30,
+    upkeep: 0.06,
+    max: 2,
+    arc: 1.6,
+    defaultAngle: 0,
+    evolvesFrom: 'eyecup',
+    desc: 'A camera-like eye with a lens and a retina inside a single cell (real single-celled plankton have them). Long, sharp sight: identify species at a glance and notice predators before they reach you.',
+    effect: '+++ sight, identify species',
   },
   chloroplast: {
     name: 'Chloroplast',
@@ -201,7 +237,9 @@ export const INTERNAL_IDS = PART_IDS.filter((id) => !PARTS[id].ext);
 
 // Parts the player starts with access to. Everything else is unlocked through
 // mutations or by absorbing genes from consumed cells (horizontal gene transfer).
-export const STARTING_UNLOCKS = ['flagellum', 'cilia', 'filter'];
+export const STARTING_UNLOCKS = ['flagellum', 'cilia', 'filter', 'eyespot'];
 
+export const EYE_IDS = PART_IDS.filter((id) => PARTS[id].eye);
+export const MAX_EYES = 4;
 export const MAX_EXTERNAL = 12;
 export const MAX_INTERNAL = 12;

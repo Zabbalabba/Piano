@@ -1,32 +1,67 @@
-// Procedural cell drawing, shared by the game view, the editor and icons.
-// Everything is drawn in the cell's local frame: +x is the front.
+// Procedural cell drawing in the Deep Glow style, shared by the game view,
+// the editor and icons. Everything is drawn in the cell's local frame:
+// +x is the front. Glow comes from additive blending and cached sprites,
+// not canvas blur, so a few hundred cells stay cheap.
 
 import { PARTS } from './parts.js';
 import { TAU } from './util.js';
 
 const GOLDEN = 2.39996;
+const spriteCache = new Map();
 
-function membranePath(ctx, r, t, phase, wob = 1) {
-  const n = 30;
-  ctx.beginPath();
-  for (let i = 0; i <= n; i++) {
-    const a = (i / n) * TAU;
-    const rr =
-      r *
-      (1 +
-        wob * 0.035 * Math.sin(3 * a + t * 2.1 + phase) +
-        wob * 0.025 * Math.sin(5 * a - t * 2.9 + phase * 1.3));
-    const x = Math.cos(a) * rr;
-    const y = Math.sin(a) * rr;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
+export function glowColor(hue, l = 62, a = 1) {
+  return `hsla(${hue}, 100%, ${l}%, ${a})`;
 }
 
-function drawFlagellum(ctx, a, r, hue, t, thrust, phase) {
-  const bx = Math.cos(a) * r * 0.95;
-  const by = Math.sin(a) * r * 0.95;
+/** Cached soft radial glow for a hue (64 px, drawn scaled). */
+export function glowSprite(hue, sat = 100, strength = 1) {
+  const key = `${Math.round(hue / 6) * 6}:${sat}:${strength}`;
+  let c = spriteCache.get(key);
+  if (c) return c;
+  c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, `hsla(${hue}, ${sat}%, 70%, ${0.55 * strength})`);
+  g.addColorStop(0.35, `hsla(${hue}, ${sat}%, 60%, ${0.22 * strength})`);
+  g.addColorStop(1, `hsla(${hue}, ${sat}%, 55%, 0)`);
+  x.fillStyle = g;
+  x.fillRect(0, 0, 64, 64);
+  spriteCache.set(key, c);
+  return c;
+}
+
+function sprite(ctx, img, x, y, size) {
+  ctx.drawImage(img, x - size / 2, y - size / 2, size, size);
+}
+
+function membranePath(r, t, phase, wob = 1) {
+  const p = new Path2D();
+  const n = 30;
+  for (let i = 0; i <= n; i++) {
+    const a = (i / n) * TAU;
+    const rr = r * (1 + wob * 0.035 * Math.sin(3 * a + t * 2.1 + phase) + wob * 0.025 * Math.sin(5 * a - t * 2.9 + phase * 1.3));
+    const x = Math.cos(a) * rr;
+    const y = Math.sin(a) * rr;
+    if (i === 0) p.moveTo(x, y);
+    else p.lineTo(x, y);
+  }
+  p.closePath();
+  return p;
+}
+
+/** Two strokes, one wide and faint, one thin and bright: a cheap glow. */
+function glowStroke(ctx, path, hue, width, bright = 70) {
+  ctx.strokeStyle = glowColor(hue, 62, 0.22);
+  ctx.lineWidth = width * 3.2;
+  ctx.stroke(path);
+  ctx.strokeStyle = glowColor(hue, bright, 0.95);
+  ctx.lineWidth = width;
+  ctx.stroke(path);
+}
+
+function flagellumPath(a, r, t, thrust, phase) {
+  const p = new Path2D();
   const dx = Math.cos(a);
   const dy = Math.sin(a);
   const px = -dy;
@@ -34,296 +69,241 @@ function drawFlagellum(ctx, a, r, hue, t, thrust, phase) {
   const L = r * 2.3;
   const speed = 5 + 13 * thrust;
   const amp = r * 0.3 * (0.35 + 0.65 * Math.min(1, thrust + 0.2));
-  const seg = 14;
-  let lx = bx;
-  let ly = by;
-  ctx.strokeStyle = `hsla(${hue}, 45%, 78%, 0.85)`;
-  ctx.lineCap = 'round';
-  for (let i = 1; i <= seg; i++) {
+  const seg = 16;
+  for (let i = 0; i <= seg; i++) {
     const s = i / seg;
     const w = Math.sin(s * 8.5 - t * speed + phase) * amp * s;
-    const x = bx + dx * L * s + px * w;
-    const y = by + dy * L * s + py * w;
-    ctx.lineWidth = Math.max(0.6, r * 0.13 * (1 - s * 0.75));
-    ctx.beginPath();
-    ctx.moveTo(lx, ly);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    lx = x;
-    ly = y;
+    const x = dx * r * 0.95 + dx * L * s + px * w;
+    const y = dy * r * 0.95 + dy * L * s + py * w;
+    if (i === 0) p.moveTo(x, y);
+    else p.lineTo(x, y);
   }
+  return p;
 }
 
-function drawCilia(ctx, a, r, hue, t, thrust, phase) {
+function ciliaPath(a, r, t, thrust, phase) {
   const span = PARTS.cilia.arc;
   const n = 8;
-  ctx.strokeStyle = `hsla(${hue}, 40%, 82%, 0.8)`;
-  ctx.lineWidth = Math.max(0.5, r * 0.045);
-  ctx.lineCap = 'round';
   const beat = 0.35 + 0.65 * Math.min(1, thrust + 0.15);
+  const p = new Path2D();
   for (let i = 0; i < n; i++) {
     const th = a - span / 2 + (span * (i + 0.5)) / n;
     const bend = Math.sin(t * 11 + i * 0.9 + phase) * 0.6 * beat;
     const bx = Math.cos(th) * r;
     const by = Math.sin(th) * r;
-    const L = r * 0.34;
-    const ta = th + bend;
-    ctx.beginPath();
-    ctx.moveTo(bx, by);
-    ctx.quadraticCurveTo(
-      bx + Math.cos(th) * L * 0.6,
-      by + Math.sin(th) * L * 0.6,
-      bx + Math.cos(ta) * L,
-      by + Math.sin(ta) * L
-    );
-    ctx.stroke();
+    const L = r * 0.36;
+    p.moveTo(bx, by);
+    p.quadraticCurveTo(bx + Math.cos(th) * L * 0.6, by + Math.sin(th) * L * 0.6, bx + Math.cos(th + bend) * L, by + Math.sin(th + bend) * L);
   }
+  return p;
+}
+
+function local(path, a, tx = 0) {
+  const q = new Path2D();
+  q.addPath(path, new DOMMatrix().rotateSelf((a * 180) / Math.PI).translateSelf(tx, 0));
+  return q;
 }
 
 function drawFilter(ctx, a, r, hue, t, phase) {
-  ctx.save();
-  ctx.rotate(a);
-  ctx.translate(r * 0.9, 0);
-  ctx.fillStyle = 'rgba(8, 18, 24, 0.55)';
-  ctx.beginPath();
-  ctx.ellipse(0, 0, r * 0.16, r * 0.36, 0, 0, TAU);
-  ctx.fill();
-  ctx.strokeStyle = `hsla(${hue}, 50%, 85%, 0.75)`;
-  ctx.lineWidth = Math.max(0.5, r * 0.05);
-  ctx.lineCap = 'round';
+  const open = new Path2D();
+  open.ellipse(0, 0, r * 0.16, r * 0.36, 0, 0, TAU);
+  const tent = new Path2D();
   for (let i = 0; i < 5; i++) {
     const y = (i - 2) * r * 0.16;
     const sway = Math.sin(t * 7 + i * 1.3 + phase) * r * 0.12;
-    ctx.beginPath();
-    ctx.moveTo(r * 0.05, y);
-    ctx.quadraticCurveTo(r * 0.25, y + sway, r * 0.38, y + sway * 1.6);
-    ctx.stroke();
+    tent.moveTo(r * 0.05, y);
+    tent.quadraticCurveTo(r * 0.25, y + sway, r * 0.4, y + sway * 1.6);
   }
-  ctx.restore();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = 'rgba(1, 4, 10, 0.75)';
+  ctx.fill(local(open, a, r * 0.9));
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  glowStroke(ctx, local(tent, a, r * 0.9), hue, Math.max(0.7, r * 0.045), 78);
 }
 
-function drawJaw(ctx, a, r, bite) {
-  ctx.save();
-  ctx.rotate(a);
-  ctx.translate(r * 0.88, 0);
+function drawJaw(ctx, a, r, hue, bite) {
   const open = 0.25 + 0.45 * bite;
-  ctx.fillStyle = 'hsl(35, 30%, 86%)';
-  ctx.strokeStyle = 'hsl(20, 25%, 30%)';
-  ctx.lineWidth = Math.max(0.5, r * 0.04);
   for (const side of [-1, 1]) {
-    ctx.save();
-    ctx.rotate(side * open);
-    ctx.beginPath();
-    ctx.moveTo(0, side * r * 0.08);
-    ctx.quadraticCurveTo(r * 0.45, side * r * 0.32, r * 0.62, side * r * 0.02);
-    ctx.quadraticCurveTo(r * 0.38, side * r * 0.12, 0, side * r * 0.24);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    const m = new Path2D();
+    m.moveTo(0, side * r * 0.08);
+    m.quadraticCurveTo(r * 0.45, side * r * 0.32, r * 0.62, side * r * 0.02);
+    m.quadraticCurveTo(r * 0.38, side * r * 0.12, 0, side * r * 0.24);
+    m.closePath();
+    const q = new Path2D();
+    q.addPath(m, new DOMMatrix().rotateSelf((a * 180) / Math.PI).translateSelf(r * 0.88, 0).rotateSelf((side * open * 180) / Math.PI));
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(30, 4, 12, 0.8)';
+    ctx.fill(q);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(255, 240, 245, 0.9)';
+    ctx.lineWidth = Math.max(0.7, r * 0.045);
+    ctx.stroke(q);
+    ctx.strokeStyle = glowColor(hue, 62, 0.3);
+    ctx.lineWidth = Math.max(2, r * 0.14);
+    ctx.stroke(q);
   }
-  ctx.fillStyle = 'rgba(40, 5, 10, 0.55)';
-  ctx.beginPath();
-  ctx.ellipse(r * 0.02, 0, r * 0.1, r * 0.2, 0, 0, TAU);
-  ctx.fill();
-  ctx.restore();
 }
 
-function drawSpike(ctx, a, r) {
-  ctx.save();
-  ctx.rotate(a);
-  ctx.fillStyle = 'hsl(48, 35%, 88%)';
-  ctx.strokeStyle = 'hsl(40, 20%, 45%)';
-  ctx.lineWidth = Math.max(0.5, r * 0.035);
-  ctx.beginPath();
-  ctx.moveTo(r * 0.92, -r * 0.16);
-  ctx.lineTo(r * 1.75, 0);
-  ctx.lineTo(r * 0.92, r * 0.16);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
+function drawSpike(ctx, a, r, hue) {
+  const p = new Path2D();
+  p.moveTo(r * 0.92, -r * 0.16);
+  p.lineTo(r * 1.75, 0);
+  p.lineTo(r * 0.92, r * 0.16);
+  p.closePath();
+  const q = local(p, a);
+  ctx.fillStyle = glowColor(hue, 60, 0.18);
+  ctx.fill(q);
+  glowStroke(ctx, q, hue, Math.max(0.7, r * 0.05), 80);
 }
 
 function drawArmor(ctx, a, r, hue) {
   const span = PARTS.armor.arc;
-  const segs = 3;
-  ctx.lineWidth = Math.max(0.5, r * 0.04);
-  for (let i = 0; i < segs; i++) {
-    const a0 = a - span / 2 + (span * i) / segs + 0.03;
-    const a1 = a - span / 2 + (span * (i + 1)) / segs - 0.03;
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 1.2, a0, a1);
-    ctx.arc(0, 0, r * 0.98, a1, a0, true);
-    ctx.closePath();
-    ctx.fillStyle = `hsl(${hue}, 18%, 42%)`;
-    ctx.strokeStyle = `hsl(${hue}, 25%, 72%)`;
-    ctx.fill();
-    ctx.stroke();
+  for (let i = 0; i < 3; i++) {
+    const a0 = a - span / 2 + (span * i) / 3 + 0.04;
+    const a1 = a - span / 2 + (span * (i + 1)) / 3 - 0.04;
+    const p = new Path2D();
+    p.arc(0, 0, r * 1.2, a0, a1);
+    p.arc(0, 0, r * 0.99, a1, a0, true);
+    p.closePath();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = `hsla(${hue}, 60%, 14%, 0.85)`;
+    ctx.fill(p);
+    ctx.globalCompositeOperation = 'lighter';
+    glowStroke(ctx, p, hue, Math.max(0.7, r * 0.04), 72);
   }
 }
 
 function drawToxin(ctx, a, r, t, phase) {
-  ctx.save();
-  ctx.rotate(a);
-  ctx.translate(r * 1.05, 0);
-  const pulse = 1 + 0.08 * Math.sin(t * 4 + phase);
-  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.45);
-  g.addColorStop(0, 'rgba(210, 120, 255, 0.55)');
-  g.addColorStop(1, 'rgba(210, 120, 255, 0)');
-  ctx.fillStyle = g;
+  const x = Math.cos(a) * r * 1.05;
+  const y = Math.sin(a) * r * 1.05;
+  const pulse = 1 + 0.12 * Math.sin(t * 4 + phase);
+  sprite(ctx, glowSprite(300), x, y, r * 1.3 * pulse);
+  ctx.fillStyle = 'hsla(300, 100%, 70%, 0.85)';
   ctx.beginPath();
-  ctx.arc(0, 0, r * 0.45, 0, TAU);
+  ctx.arc(x, y, r * 0.2 * pulse, 0, TAU);
   ctx.fill();
-  ctx.fillStyle = 'hsl(285, 65%, 52%)';
-  ctx.strokeStyle = 'hsl(285, 70%, 80%)';
-  ctx.lineWidth = Math.max(0.5, r * 0.04);
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 0.24 * pulse, 0, TAU);
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
 }
 
-function drawEye(ctx, a, r, look) {
-  const x = Math.cos(a) * r * 0.78;
-  const y = Math.sin(a) * r * 0.78;
-  const er = r * 0.2;
-  ctx.fillStyle = 'rgba(245, 250, 240, 0.95)';
-  ctx.strokeStyle = 'rgba(20, 30, 30, 0.6)';
-  ctx.lineWidth = Math.max(0.4, r * 0.03);
+/** Eyes look different at each tier so progress is visible on the creature. */
+function drawEye(ctx, t, a, r, hue, look) {
+  ctx.globalCompositeOperation = 'source-over';
+  if (t === 'eyespot') {
+    // A spot of pigment: an ember-coloured dot, no pupil.
+    const x = Math.cos(a) * r * 0.8;
+    const y = Math.sin(a) * r * 0.8;
+    ctx.globalCompositeOperation = 'lighter';
+    sprite(ctx, glowSprite(18), x, y, r * 0.7);
+    ctx.fillStyle = 'hsl(18, 100%, 62%)';
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.12, 0, TAU);
+    ctx.fill();
+    return;
+  }
+  const big = t === 'ocelloid';
+  const er = r * (big ? 0.3 : 0.21);
+  const x = Math.cos(a) * r * (big ? 0.86 : 0.78);
+  const y = Math.sin(a) * r * (big ? 0.86 : 0.78);
+  const lx = Math.cos(look) * er * 0.38;
+  const ly = Math.sin(look) * er * 0.38;
+  ctx.globalCompositeOperation = 'lighter';
+  sprite(ctx, glowSprite(big ? 190 : hue, 60), x, y, er * 4);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = '#eafcff';
   ctx.beginPath();
   ctx.arc(x, y, er, 0, TAU);
   ctx.fill();
-  ctx.stroke();
-  const lx = Math.cos(look) * er * 0.4;
-  const ly = Math.sin(look) * er * 0.4;
-  ctx.fillStyle = '#10161a';
+  if (big) {
+    // Iris and lens.
+    ctx.fillStyle = 'hsl(185, 90%, 45%)';
+    ctx.beginPath();
+    ctx.arc(x + lx, y + ly, er * 0.62, 0, TAU);
+    ctx.fill();
+  } else {
+    // The rim of the cup.
+    ctx.strokeStyle = `hsla(${hue}, 80%, 35%, 0.9)`;
+    ctx.lineWidth = Math.max(0.6, er * 0.25);
+    ctx.beginPath();
+    ctx.arc(x, y, er * 0.9, a - 1.9, a + 1.9, true);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#020611';
   ctx.beginPath();
-  ctx.arc(x + lx, y + ly, er * 0.5, 0, TAU);
+  ctx.arc(x + lx, y + ly, er * (big ? 0.34 : 0.5), 0, TAU);
   ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
   ctx.beginPath();
-  ctx.arc(x + lx - er * 0.18, y + ly - er * 0.18, er * 0.16, 0, TAU);
+  ctx.arc(x + lx - er * 0.22, y + ly - er * 0.22, er * (big ? 0.18 : 0.14), 0, TAU);
   ctx.fill();
 }
+
+const ORG_HUE = { chloroplast: 108, mitochondrion: 18, vacuole: 200, chemosynth: 42, antifreeze: 195, heatshock: 8, pigment: 350, peroxisome: 270, detox: 65 };
 
 export function drawOrganelle(ctx, t, x, y, s, rot) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
+  const h = ORG_HUE[t] ?? 180;
+  ctx.fillStyle = `hsl(${h}, 95%, 62%)`;
+  ctx.strokeStyle = `hsl(${h}, 100%, 82%)`;
+  ctx.lineWidth = Math.max(0.5, s * 0.12);
+  ctx.beginPath();
   switch (t) {
     case 'chloroplast':
-      ctx.fillStyle = '#62c24c';
-      ctx.beginPath();
       ctx.ellipse(0, 0, s, s * 0.55, 0, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = '#2d6f27';
-      ctx.lineWidth = Math.max(0.4, s * 0.12);
-      for (let i = -1; i <= 1; i++) {
-        ctx.beginPath();
-        ctx.moveTo(-s * 0.6, i * s * 0.22);
-        ctx.lineTo(s * 0.6, i * s * 0.22);
-        ctx.stroke();
-      }
       break;
     case 'mitochondrion':
-      ctx.fillStyle = '#e57a48';
-      ctx.beginPath();
-      ctx.ellipse(0, 0, s, s * 0.48, 0, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = '#8c3216';
-      ctx.lineWidth = Math.max(0.4, s * 0.11);
-      ctx.beginPath();
-      for (let i = 0; i <= 6; i++) {
-        const xx = -s * 0.7 + (i / 6) * s * 1.4;
-        const yy = (i % 2 ? 1 : -1) * s * 0.25;
-        if (i === 0) ctx.moveTo(xx, yy);
-        else ctx.lineTo(xx, yy);
-      }
-      ctx.stroke();
+      ctx.ellipse(0, 0, s, s * 0.45, 0, 0, TAU);
       break;
     case 'vacuole':
-      ctx.fillStyle = 'rgba(190, 232, 255, 0.32)';
-      ctx.strokeStyle = 'rgba(225, 246, 255, 0.7)';
-      ctx.lineWidth = Math.max(0.4, s * 0.08);
-      ctx.beginPath();
+      ctx.fillStyle = 'rgba(160, 220, 255, 0.25)';
       ctx.arc(0, 0, s * 0.95, 0, TAU);
-      ctx.fill();
-      ctx.stroke();
       break;
     case 'chemosynth':
-      ctx.fillStyle = '#f0b53c';
       for (let i = 0; i < 3; i++) {
-        ctx.save();
-        ctx.rotate((i * TAU) / 3);
-        ctx.translate(s * 0.4, 0);
-        ctx.beginPath();
-        ctx.ellipse(0, 0, s * 0.45, s * 0.2, 0, 0, TAU);
-        ctx.fill();
-        ctx.restore();
+        const a = (i * TAU) / 3;
+        ctx.moveTo(Math.cos(a) * s * 0.85, Math.sin(a) * s * 0.85);
+        ctx.ellipse(Math.cos(a) * s * 0.4, Math.sin(a) * s * 0.4, s * 0.45, s * 0.2, a, 0, TAU);
       }
       break;
     case 'antifreeze':
-      ctx.strokeStyle = '#d2f1ff';
-      ctx.lineWidth = Math.max(0.5, s * 0.16);
-      ctx.lineCap = 'round';
+      ctx.fillStyle = 'transparent';
       for (let i = 0; i < 3; i++) {
-        ctx.rotate(Math.PI / 3);
-        ctx.beginPath();
-        ctx.moveTo(-s * 0.7, 0);
-        ctx.lineTo(s * 0.7, 0);
-        ctx.stroke();
+        const a = (i * Math.PI) / 3;
+        ctx.moveTo(-Math.cos(a) * s * 0.7, -Math.sin(a) * s * 0.7);
+        ctx.lineTo(Math.cos(a) * s * 0.7, Math.sin(a) * s * 0.7);
       }
+      ctx.lineWidth = Math.max(0.6, s * 0.18);
       break;
     case 'heatshock':
-      ctx.fillStyle = '#ff7b54';
-      ctx.strokeStyle = '#ffd0b8';
-      ctx.lineWidth = Math.max(0.4, s * 0.08);
-      ctx.beginPath();
       for (let i = 0; i < 6; i++) {
         const a = (i / 6) * TAU;
-        const xx = Math.cos(a) * s * 0.6;
-        const yy = Math.sin(a) * s * 0.6;
-        if (i === 0) ctx.moveTo(xx, yy);
-        else ctx.lineTo(xx, yy);
+        if (i === 0) ctx.moveTo(Math.cos(a) * s * 0.6, Math.sin(a) * s * 0.6);
+        else ctx.lineTo(Math.cos(a) * s * 0.6, Math.sin(a) * s * 0.6);
       }
       ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
       break;
     case 'pigment':
-      ctx.fillStyle = '#8a2f1c';
       for (let i = 0; i < 5; i++) {
-        ctx.beginPath();
-        ctx.arc(Math.cos(i * 1.3) * s * 0.5, Math.sin(i * 2.1) * s * 0.5, s * 0.22, 0, TAU);
-        ctx.fill();
+        const px = Math.cos(i * 1.3) * s * 0.5;
+        const py = Math.sin(i * 2.1) * s * 0.5;
+        ctx.moveTo(px + s * 0.22, py);
+        ctx.arc(px, py, s * 0.22, 0, TAU);
       }
       break;
     case 'peroxisome':
-      ctx.fillStyle = '#b892ff';
-      ctx.beginPath();
       ctx.arc(0, 0, s * 0.5, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = '#4b2a8a';
-      ctx.beginPath();
-      ctx.arc(0, 0, s * 0.2, 0, TAU);
-      ctx.fill();
       break;
     case 'detox':
-      ctx.fillStyle = '#cfdc4c';
-      ctx.strokeStyle = '#59611a';
-      ctx.lineWidth = Math.max(0.4, s * 0.08);
-      ctx.beginPath();
       ctx.moveTo(0, -s * 0.65);
       ctx.lineTo(s * 0.5, 0);
       ctx.lineTo(0, s * 0.65);
       ctx.lineTo(-s * 0.5, 0);
       ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
       break;
   }
+  ctx.fill();
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -341,6 +321,7 @@ export function organellePositions(g, r) {
 /**
  * Draw a cell. `st` carries animation state: heading, thrustLevel, biteAnim,
  * flash, phase, look (world angle the eyes track), x, y.
+ * opts.blob draws only a soft glow (what an eyeless viewer makes out at range).
  */
 export function drawCell(ctx, g, r, st, t, opts = {}) {
   const hue = g.hue;
@@ -349,83 +330,107 @@ export function drawCell(ctx, g, r, st, t, opts = {}) {
   ctx.save();
   ctx.translate(st.x, st.y);
   ctx.rotate(st.heading);
+  ctx.globalCompositeOperation = 'lighter';
 
-  if (opts.simple) {
-    ctx.fillStyle = `hsla(${hue}, 55%, 55%, 0.9)`;
+  if (opts.blob || opts.simple) {
+    const pulse = 1 + 0.06 * Math.sin(t * 2 + phase);
+    sprite(ctx, glowSprite(hue, opts.blobSat ?? 100), 0, 0, r * 4.2 * pulse);
+    ctx.fillStyle = `hsla(${hue}, ${opts.blobSat ?? 100}%, 70%, 0.35)`;
     ctx.beginPath();
-    ctx.arc(0, 0, r, 0, TAU);
+    ctx.arc(0, 0, r * 0.75, 0, TAU);
     ctx.fill();
     ctx.restore();
     return;
   }
 
+  sprite(ctx, glowSprite(hue), 0, 0, r * (opts.halo ?? 5));
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
   // Back layer: locomotion.
+  const lw = Math.max(0.8, r * 0.07);
   for (const p of g.parts) {
-    if (p.t === 'flagellum') drawFlagellum(ctx, p.a, r, hue, t, thrust, phase + p.a);
-    else if (p.t === 'cilia') drawCilia(ctx, p.a, r, hue, t, thrust, phase + p.a);
+    if (p.t === 'flagellum') glowStroke(ctx, flagellumPath(p.a, r, t, thrust, phase + p.a), hue, lw);
+    else if (p.t === 'cilia') {
+      ctx.strokeStyle = glowColor(hue, 75, 0.75);
+      ctx.lineWidth = Math.max(0.5, r * 0.04);
+      ctx.stroke(ciliaPath(p.a, r, t, thrust, phase + p.a));
+    }
   }
   for (const p of g.parts) if (p.t === 'armor') drawArmor(ctx, p.a, r, hue);
-  for (const p of g.parts) if (p.t === 'spike') drawSpike(ctx, p.a, r);
+  ctx.globalCompositeOperation = 'lighter';
+  for (const p of g.parts) if (p.t === 'spike') drawSpike(ctx, p.a, r, hue);
   for (const p of g.parts) if (p.t === 'toxin') drawToxin(ctx, p.a, r, t, phase);
 
-  // Body.
-  membranePath(ctx, r, t, phase, opts.wobble ?? 1);
-  const grad = ctx.createRadialGradient(-r * 0.3, -r * 0.35, r * 0.1, 0, 0, r * 1.05);
-  grad.addColorStop(0, `hsla(${hue}, 65%, 70%, 0.92)`);
-  grad.addColorStop(0.7, `hsla(${hue}, 55%, 48%, 0.88)`);
-  grad.addColorStop(1, `hsla(${hue}, 60%, 32%, 0.9)`);
-  ctx.fillStyle = grad;
-  ctx.fill();
-
+  // Body: a dark translucent interior with a glowing rim.
+  const body = membranePath(r, t, phase, opts.wobble ?? 1);
+  ctx.globalCompositeOperation = 'source-over';
+  const fill = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+  fill.addColorStop(0, `hsla(${hue}, 80%, 14%, 0.75)`);
+  fill.addColorStop(1, `hsla(${hue}, 90%, 26%, 0.6)`);
+  ctx.fillStyle = fill;
+  ctx.fill(body);
   const c = opts.counts;
   const pigments = c ? c.pigment : g.parts.filter((p) => p.t === 'pigment').length;
   if (pigments) {
-    ctx.fillStyle = `rgba(110, 40, 20, ${0.12 * pigments})`;
-    ctx.fill();
+    ctx.fillStyle = `rgba(40, 0, 10, ${0.15 * pigments})`;
+    ctx.fill(body);
   }
+  ctx.globalCompositeOperation = 'lighter';
+  const rim = ctx.createRadialGradient(0, 0, r * 0.45, 0, 0, r);
+  rim.addColorStop(0, glowColor(hue, 60, 0));
+  rim.addColorStop(1, glowColor(hue, 60, 0.35));
+  ctx.fillStyle = rim;
+  ctx.fill(body);
 
   // Nucleus.
-  ctx.fillStyle = `hsla(${(hue + 30) % 360}, 35%, 28%, 0.55)`;
+  const nx = -r * 0.18;
+  const nucleus = ctx.createRadialGradient(nx, 0, 0, nx, 0, r * 0.3);
+  nucleus.addColorStop(0, 'rgba(255, 255, 255, 0.45)');
+  nucleus.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = nucleus;
   ctx.beginPath();
-  ctx.arc(-r * 0.18, r * 0.02, r * 0.27, 0, TAU);
-  ctx.fill();
-  ctx.fillStyle = `hsla(${(hue + 30) % 360}, 40%, 18%, 0.7)`;
-  ctx.beginPath();
-  ctx.arc(-r * 0.22, r * 0.05, r * 0.09, 0, TAU);
+  ctx.arc(nx, 0, r * 0.3, 0, TAU);
   ctx.fill();
 
-  // Organelles.
-  if (r > 7 || opts.detail) {
+  // Organelles: glowing dots.
+  if (r > 6 || opts.detail) {
     for (const o of organellePositions(g, r)) {
       const wob = Math.sin(t * 0.8 + o.rot) * r * 0.03;
-      drawOrganelle(ctx, o.t, o.x + wob, o.y - wob, r * 0.17, o.rot + t * 0.15);
+      const s = r * 0.16;
+      sprite(ctx, glowSprite(ORG_HUE[o.t] ?? 180), o.x + wob, o.y - wob, s * 4);
+      if (r > 10 || opts.detail) {
+        ctx.globalCompositeOperation = 'source-over';
+        drawOrganelle(ctx, o.t, o.x + wob, o.y - wob, s, o.rot + t * 0.15);
+        ctx.globalCompositeOperation = 'lighter';
+      }
     }
   }
 
-  // Membrane outline.
-  membranePath(ctx, r, t, phase, opts.wobble ?? 1);
-  ctx.lineWidth = Math.max(0.8, r * (0.06 + g.membrane * 0.14));
-  ctx.strokeStyle = `hsla(${hue}, 65%, 82%, 0.75)`;
-  ctx.stroke();
+  // Membrane.
+  glowStroke(ctx, body, hue, Math.max(1, r * (0.05 + g.membrane * 0.1)));
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.lineWidth = Math.max(0.5, r * 0.025);
+  ctx.stroke(body);
 
   if (st.flash > 0) {
-    ctx.fillStyle = `rgba(255, 70, 70, ${st.flash * 0.45})`;
-    ctx.fill();
+    ctx.fillStyle = `rgba(255, 60, 90, ${st.flash * 0.5})`;
+    ctx.fill(body);
   }
 
   // Front layer.
   for (const p of g.parts) {
     if (p.t === 'filter') drawFilter(ctx, p.a, r, hue, t, phase);
-    else if (p.t === 'jaw') drawJaw(ctx, p.a, r, st.biteAnim || 0);
+    else if (p.t === 'jaw') drawJaw(ctx, p.a, r, hue, st.biteAnim || 0);
   }
   const look = st.look != null ? st.look - st.heading : 0;
-  for (const p of g.parts) if (p.t === 'eyespot') drawEye(ctx, p.a, r, look);
+  for (const p of g.parts) if (PARTS[p.t].eye) drawEye(ctx, p.t, p.a, r, hue, look);
 
   ctx.restore();
 }
 
 /** Small standalone icon of a single part, for palettes and cards. */
-export function drawPartIcon(ctx, t, size, hue = 175) {
+export function drawPartIcon(ctx, t, size, hue = 172) {
   const r = size * 0.28;
   ctx.save();
   ctx.clearRect(0, 0, size, size);
@@ -433,23 +438,32 @@ export function drawPartIcon(ctx, t, size, hue = 175) {
   if (part.ext) {
     // Show the part on a slice of membrane, facing right.
     ctx.translate(size * 0.3, size / 2);
-    ctx.fillStyle = `hsla(${hue}, 50%, 45%, 0.9)`;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = `hsla(${hue}, 80%, 16%, 0.9)`;
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, TAU);
     ctx.fill();
-    ctx.strokeStyle = `hsla(${hue}, 60%, 80%, 0.8)`;
-    ctx.lineWidth = 1.2;
-    ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    const ring = new Path2D();
+    ring.arc(0, 0, r, 0, TAU);
+    glowStroke(ctx, ring, hue, 1.2);
     const time = 0.6;
-    if (t === 'flagellum') drawFlagellum(ctx, 0, r, hue, time, 0.6, 0);
-    else if (t === 'cilia') drawCilia(ctx, 0, r, hue, time, 0.6, 0);
-    else if (t === 'filter') drawFilter(ctx, 0, r, hue, time, 0);
-    else if (t === 'jaw') drawJaw(ctx, 0, r, 0.5);
-    else if (t === 'spike') drawSpike(ctx, 0, r);
+    ctx.lineCap = 'round';
+    if (t === 'flagellum') glowStroke(ctx, flagellumPath(0, r, time, 0.6, 0), hue, 1.4);
+    else if (t === 'cilia') {
+      ctx.strokeStyle = glowColor(hue, 75, 0.9);
+      ctx.lineWidth = 1;
+      ctx.stroke(ciliaPath(0, r, time, 0.6, 0));
+    } else if (t === 'filter') drawFilter(ctx, 0, r, hue, time, 0);
+    else if (t === 'jaw') drawJaw(ctx, 0, r, hue, 0.5);
+    else if (t === 'spike') drawSpike(ctx, 0, r, hue);
     else if (t === 'armor') drawArmor(ctx, 0, r, hue);
     else if (t === 'toxin') drawToxin(ctx, 0, r, time, 0);
-    else if (t === 'eyespot') drawEye(ctx, 0, r * 1.5, 0);
+    else if (part.eye) drawEye(ctx, t, 0, r * 1.5, hue, 0);
   } else {
+    ctx.globalCompositeOperation = 'lighter';
+    sprite(ctx, glowSprite(ORG_HUE[t] ?? 180), size / 2, size / 2, size);
+    ctx.globalCompositeOperation = 'source-over';
     drawOrganelle(ctx, t, size / 2, size / 2, size * 0.3, -0.4);
   }
   ctx.restore();

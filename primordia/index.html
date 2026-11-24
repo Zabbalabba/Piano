@@ -7,7 +7,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;800&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -27,6 +27,7 @@
       <div class="vitals-foot">
         <span class="dna" title="DNA points, spent in the editor"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1c0 4 8 4 8 7s-8 3-8 7M12 1c0 4-8 4-8 7s8 3 8 7M5 4h6M5 12h6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><b id="hud-dna">0</b> DNA</span>
         <span class="lineage" title="Living members of your lineage"><b id="hud-lineage">1</b> alive</span>
+        <span class="sight" id="hud-sight" title="How clearly you see. Better eyes reveal more.">Sight: Blurry</span>
         <span class="diet" id="hud-diet">Grazer</span>
       </div>
     </section>
@@ -101,6 +102,7 @@
         </div>
         <div>
           <h3>Gain new parts</h3>
+          <p>Without eyes, other cells are blurry glows beyond a short distance. An <b>eyespot</b> shows shapes, an <b>eye cup</b> tells threats from prey, an <b>ocelloid</b> identifies species and spots hunters off-screen. Eyes see farthest where they face. Living a generation with an eye lets it evolve to the next tier.</p>
           <p>You start with only a few parts unlocked. Others come from mutations, or from <b>horizontal gene transfer</b>: eating cells or their remains can give you their genes.</p>
           <p><kbd>Tab</kbd> opens the ecosystem view, <kbd>P</kbd> pauses, and the mouse wheel zooms.</p>
         </div>
@@ -150,6 +152,11 @@
       <aside class="ed-stats">
         <div class="ed-section-title">Body</div>
         <div id="ed-stat-list" class="stat-list"></div>
+        <div class="ed-section-title">Sight</div>
+        <div class="sight-box">
+          <canvas id="ed-sight" aria-label="Diagram of how far your cell can see in each direction"></canvas>
+          <p id="ed-sight-text" class="small muted"></p>
+        </div>
         <div class="ed-section-title">Habitat forecast</div>
         <div class="fit-legend"><span>now</span><span id="ed-next-label">next era</span></div>
         <div id="ed-fit-list" class="fit-list"></div>

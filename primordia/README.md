@@ -41,12 +41,32 @@ Photosynthesizers really do add oxygen to the water around them.
 
 ### Body (`js/parts.js`, `js/genome.js`)
 
-There are 17 parts in 6 categories. External parts sit on the membrane at an angle, and that angle matters:
+There are 19 parts in 6 categories. External parts sit on the membrane at an angle, and that angle matters:
 
 - A flagellum pushes hardest from the rear and wastes energy on the side.
 - Mouths, spikes, armor and eyes each cover an arc. Armor blocks 60% of the damage coming from its side.
 
 `phenotype()` turns a genome into every number the simulation uses: speed, turning, HP, upkeep, vision, tolerances, digestion, bite and so on.
+
+### Sight (`js/vision.js`)
+
+Every cell senses its surroundings a short way in all directions. Eyes add range in the direction they face, so placement matters: front-facing eyes leave you blind behind. Eyes also need light, though bioluminescence keeps them partly useful in the dark.
+
+Eyes evolve in tiers. Each tier adds **range** and **clarity**:
+
+| Eye | Clarity | What you get |
+|---|---|---|
+| none | Light and dark | Beyond a short distance, other cells are blurry glows |
+| Eyespot (8 DNA, unlocked from the start) | Shapes | You see other cells' bodies and parts |
+| Eye Cup | Detail | Threats are ringed red and prey green |
+| Ocelloid | Sharp | Species name tags and off-screen predator arrows |
+
+How fast sight improves:
+- Living a generation with an eye unlocks its next tier, which you can then buy as an in-place upgrade in the editor (10–12 DNA).
+- An eye mutation is guaranteed at every division until your lineage has an eye cup, so decent sight takes about two divisions.
+- AI cells use the same directional sight. Eyeless cells can't tell hunters from harmless cells, so they flee anything large.
+
+Out-of-sight cells show only as faint bioluminescent glows. With an eyespot or better, those glows carry the species colour. The editor shows a top-down diagram of what the new body can see, compared with the current one.
 
 ### Ecosystem (`js/world.js`, `js/ai.js`, `js/species.js`)
 
@@ -59,7 +79,7 @@ There are 17 parts in 6 categories. External parts sit on the membrane at an ang
 
 - `js/pressures.js`: tracks the stress your generation experienced and builds the mutation offers.
 - `js/biology.js`: shared rules for environmental damage, energy income and the habitat-fit score.
-- `js/render.js`, `js/cellDraw.js`: Canvas 2D renderer with procedurally animated cells.
+- `js/render.js`, `js/cellDraw.js`: Canvas 2D renderer in the Deep Glow style (visual concept B), with procedurally animated, glowing cells and sight-shaped darkness.
 - `js/hud.js`, `js/editor.js`, `js/eco.js`, `js/main.js`: UI and the game loop.
 
 ## Tooling

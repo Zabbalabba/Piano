@@ -2,6 +2,7 @@
 
 import { envStress, autotrophIncome } from './biology.js';
 import { clamp } from './util.js';
+import { maxRange, rangeToward } from './vision.js';
 
 const DIRS = 8;
 const tmpEnv = {};
@@ -12,11 +13,6 @@ function envUtility(ph, e) {
   return -s.total * 60 + autotrophIncome(ph, e) * 1.5;
 }
 
-export function effectiveVision(c) {
-  const light = c.env.light ?? 0.5;
-  return c.ph.vision * (0.6 + 0.4 * Math.min(1, light * 2));
-}
-
 export function think(c, world, dt) {
   const ai = c.ai;
   ai.timer -= dt;
@@ -24,8 +20,10 @@ export function think(c, world, dt) {
   ai.timer = 0.2 + world.rng.float(0, 0.12);
 
   const ph = c.ph;
-  const vis = effectiveVision(c);
+  const vis = maxRange(c);
   const vis2 = vis * vis;
+  const base2 = ph.sight.base * ph.sight.base;
+  const clarity = ph.sight.clarity;
   let fx = 0;
   let fy = 0;
   let threat = 0;
@@ -43,9 +41,18 @@ export function think(c, world, dt) {
     const d = Math.sqrt(d2) + 0.001;
     if (d < 45 + c.r) crowd++;
     if (o.speciesId === c.speciesId) return;
-    // Camouflage-free world: anything with a jaw that isn't tiny is scary.
-    if (o.ph.bite > 0 && o.r > c.r * 0.55) {
-      const danger = ((o.ph.bite * 3) / (c.hp + 6)) * (o.r / c.r) * (1 - d / vis);
+    // Sight is directional: eyes see far where they face, little elsewhere.
+    let range = vis;
+    if (d2 > base2) {
+      range = rangeToward(c, Math.atan2(dy, dx));
+      if (d > range) return;
+    }
+    // Without eyes a cell can't tell a hunter from a harmless grazer, so any
+    // large shape is a possible threat. With eyes it can see the jaw.
+    const looksDangerous = clarity === 0 ? o.r > c.r * 0.9 && (o.ph.bite > 0 || d < 70 + c.r) : o.ph.bite > 0 && o.r > c.r * 0.55;
+    if (looksDangerous) {
+      const bite = o.ph.bite > 0 ? o.ph.bite : 6;
+      const danger = ((bite * 3) / (c.hp + 6)) * (o.r / c.r) * (1 - d / range);
       fx -= (dx / d) * danger;
       fy -= (dy / d) * danger;
       threat += danger;
@@ -75,6 +82,7 @@ export function think(c, world, dt) {
       if (eff < 0.25) return;
       const d = Math.hypot(f.x - c.x, f.y - c.y);
       if (d > r) return;
+      if (d > ph.sight.base && d > rangeToward(c, Math.atan2(f.y - c.y, f.x - c.x)) * 0.85) return;
       const score = d / (eff * f.energy);
       if (score < foodScore) {
         foodScore = score;

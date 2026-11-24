@@ -7,6 +7,7 @@ import { drawCell, drawPartIcon } from './cellDraw.js';
 import { habitatFit } from './biology.js';
 import { BIOMES, BIOME_IDS, ERAS } from './environment.js';
 import { angleDiff, clamp, TAU } from './util.js';
+import { CLARITY, BINS } from './vision.js';
 
 const $ = (id) => document.getElementById(id);
 const UP = -Math.PI / 2;
@@ -129,14 +130,16 @@ export class Editor {
       const icon = document.createElement('canvas');
       icon.width = icon.height = 88;
       b.appendChild(icon);
-      const unlocked = o.kind !== 'part' || this.world.progress.unlocked.has(o.part);
+      const gene = o.kind === 'part' ? o.part : o.kind === 'upgrade' ? o.to : null;
+      const isNew = gene && !this.world.progress.unlocked.has(gene);
       b.insertAdjacentHTML(
         'beforeend',
-        `<div class="o-title">${o.title}</div><div class="o-effect">${o.effect}</div><div class="o-tag">${o.kind === 'part' && !unlocked ? 'New gene' : o.cat}</div><div class="o-reason">${o.reason}</div>`
+        `<div class="o-title">${o.title}</div><div class="o-effect">${o.effect}</div><div class="o-tag">${isNew ? 'New gene' : o.cat}</div><div class="o-reason">${o.reason}</div>`
       );
       const ictx = icon.getContext('2d');
       ictx.scale(2, 2);
       if (o.kind === 'part') drawPartIcon(ictx, o.part, 44, this.orig.hue);
+      else if (o.kind === 'upgrade') drawPartIcon(ictx, o.to, 44, this.orig.hue);
       else drawCell(ictx, this.orig, o.kind === 'size' ? (o.delta > 0 ? 15 : 10) : 13, { x: 22, y: 22, heading: UP, phase: 0 }, 0, { wobble: 0 });
       b.addEventListener('click', () => this.chooseOffer(i));
       list.appendChild(b);
@@ -154,6 +157,12 @@ export class Editor {
     // Undo the previous choice.
     const prev = this.offers[this.chosen];
     this.draft.parts = this.draft.parts.filter((p) => p.o !== 'mut');
+    for (const p of this.draft.parts) {
+      if (p.mutFrom) {
+        p.t = p.mutFrom;
+        delete p.mutFrom;
+      }
+    }
     if (prev && prev.kind === 'size') {
       if (Math.abs(this.draft.size - this.baseSize) < 0.001) this.draft.size = this.orig.size;
       this.baseSize = this.orig.size;
@@ -174,6 +183,14 @@ export class Editor {
         if (canAddPart(this.draft, o.part)) {
           const a = PARTS[o.part].ext ? normAngle(o.angle ?? placeAngleFor(o.part, this.draft)) : 0;
           this.draft.parts.push({ t: o.part, a, o: 'mut' });
+        }
+      } else if (o.kind === 'upgrade') {
+        // Evolve the matching eye in place (the one closest to the offer's angle).
+        const cands = this.draft.parts.filter((p) => p.t === o.from && !p.mutFrom);
+        cands.sort((a, b) => Math.abs(angleDiff(a.a, o.angle)) - Math.abs(angleDiff(b.a, o.angle)));
+        if (cands[0]) {
+          cands[0].mutFrom = cands[0].t;
+          cands[0].t = o.to;
         }
       } else if (o.kind === 'size') {
         const nb = clamp(this.orig.size + o.delta, SIZE_MIN, SIZE_MAX);
@@ -231,17 +248,23 @@ export class Editor {
     const c = countParts(this.draft);
     const unlocked = this.world.progress.unlocked;
     for (const [id, el] of Object.entries(this.paletteBtns)) {
-      const locked = !unlocked.has(id) && !this.draft.parts.some((p) => p.t === id && p.o === 'mut');
+      const locked = !unlocked.has(id) && !this.draft.parts.some((p) => p.t === id && (p.o === 'mut' || p.mutFrom));
       el.b.classList.toggle('locked', locked);
       el.b.setAttribute('aria-pressed', String(this.placing === id));
-      el.sub.textContent = locked ? 'Locked' : `${c[id]} / ${PARTS[id].max} · ${PARTS[id].effect}`;
+      const from = PARTS[id].evolvesFrom;
+      el.sub.textContent = locked ? (from ? `Evolves from ${PARTS[from].name.toLowerCase()}` : 'Locked') : `${c[id]} / ${PARTS[id].max} · ${PARTS[id].effect}`;
     }
   }
 
   pickPart(id) {
     const unlocked = this.world.progress.unlocked.has(id);
     if (!unlocked) {
-      this.hint(`${PARTS[id].name} is locked. Mutations and absorbing genes from cells that have it can unlock it.`);
+      const from = PARTS[id].evolvesFrom;
+      this.hint(
+        from
+          ? `${PARTS[id].name} evolves from an ${PARTS[from].name.toLowerCase()}. Live one generation with an ${PARTS[from].name.toLowerCase()} and you can upgrade it, or wait for the mutation.`
+          : `${PARTS[id].name} is locked. Mutations and absorbing genes from cells that have it can unlock it.`
+      );
       return;
     }
     if (!canAddPart(this.draft, id)) {
@@ -359,7 +382,7 @@ export class Editor {
     const sel = this.selected;
     if (sel && PARTS[sel.t].ext && PARTS[sel.t].arc > 0) {
       const arc = PARTS[sel.t].arc;
-      ctx.fillStyle = 'rgba(255, 148, 112, 0.12)';
+      ctx.fillStyle = 'rgba(61, 255, 226, 0.1)';
       ctx.beginPath();
       ctx.moveTo(cx, cy);
       ctx.arc(cx, cy, R * 2.4, UP + sel.a - arc / 2, UP + sel.a + arc / 2);
@@ -378,7 +401,7 @@ export class Editor {
 
     if (sel && PARTS[sel.t].ext) {
       const sa = UP + sel.a;
-      ctx.strokeStyle = '#ff9470';
+      ctx.strokeStyle = '#3dffe2';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(cx + Math.cos(sa) * R * 1.05, cy + Math.sin(sa) * R * 1.05, Math.max(10, R * 0.32), 0, TAU);
@@ -386,11 +409,11 @@ export class Editor {
     }
     if (this.placing && this.pointer && this.pointer.d > R * 0.3) {
       const sa = UP + this.pointer.a;
-      ctx.fillStyle = 'rgba(255, 148, 112, 0.85)';
+      ctx.fillStyle = 'rgba(61, 255, 226, 0.9)';
       ctx.beginPath();
       ctx.arc(cx + Math.cos(sa) * R, cy + Math.sin(sa) * R, 6, 0, TAU);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 148, 112, 0.5)';
+      ctx.strokeStyle = 'rgba(61, 255, 226, 0.5)';
       ctx.setLineDash([4, 4]);
       ctx.beginPath();
       ctx.moveTo(cx, cy);
@@ -404,7 +427,10 @@ export class Editor {
 
   cost() {
     let c = 0;
-    for (const p of this.draft.parts) if (p.o === 'new') c += PARTS[p.t].dna;
+    for (const p of this.draft.parts) {
+      if (p.o === 'new') c += PARTS[p.t].dna;
+      else if (p.o === 'up') c += PARTS[p.t].dna - PARTS[p.upFrom].dna;
+    }
     c += Math.round(Math.abs(this.draft.size - this.baseSize) * SIZE_COST);
     c += Math.round(Math.abs(this.draft.membrane - this.baseMem) * MEM_COST);
     return c;
@@ -431,7 +457,14 @@ export class Editor {
     }
     box.hidden = false;
     const P = PARTS[sel.t];
-    const origin = sel.o === 'mut' ? 'Free mutation' : sel.o === 'new' ? `Bought for ${P.dna} DNA` : 'Inherited';
+    const origin =
+      sel.o === 'mut' || sel.mutFrom
+        ? 'Free mutation'
+        : sel.o === 'new'
+          ? `Bought for ${P.dna} DNA`
+          : sel.o === 'up'
+            ? `Evolved from ${PARTS[sel.upFrom].name.toLowerCase()} for ${P.dna - PARTS[sel.upFrom].dna} DNA`
+            : 'Inherited';
     const canMirror = P.ext && this.world.progress.unlocked.has(sel.t) && canAddPart(this.draft, sel.t) && Math.abs(Math.abs(sel.a) - Math.PI) > 0.15 && Math.abs(sel.a) > 0.15;
     box.innerHTML = `<b>${P.name}</b><span class="grow">${P.desc} <i>${origin}.</i></span>`;
     if (canMirror) {
@@ -445,6 +478,27 @@ export class Editor {
         this.refresh();
       });
       box.appendChild(m);
+    }
+    // Eyes can evolve to the next tier in place.
+    const next = P.evolvesTo;
+    if (next && !sel.mutFrom) {
+      const nextUnlocked = this.world.progress.unlocked.has(next);
+      const room = countParts(this.draft)[next] < PARTS[next].max;
+      const up = document.createElement('button');
+      up.className = 'btn primary';
+      const price = PARTS[next].dna - P.dna;
+      up.textContent = `Evolve into ${PARTS[next].name} (${price})`;
+      up.disabled = !nextUnlocked || !room;
+      if (!nextUnlocked) up.title = `Live one generation with an ${P.name.toLowerCase()} first.`;
+      up.addEventListener('click', () => {
+        if (sel.o === 'orig') {
+          sel.o = 'up';
+          sel.upFrom = sel.t;
+        }
+        sel.t = next;
+        this.refresh();
+      });
+      box.appendChild(up);
     }
     const rm = document.createElement('button');
     rm.className = 'btn';
@@ -460,7 +514,7 @@ export class Editor {
       return;
     }
     this.draft.parts.splice(this.draft.parts.indexOf(part), 1);
-    if (part.o === 'mut') {
+    if (part.o === 'mut' || part.mutFrom) {
       this.chosen = -1;
       const btns = $('ed-offer-list').children;
       for (let k = 0; k < btns.length; k++) btns[k].setAttribute('aria-pressed', String(k === btns.length - 1));
@@ -496,7 +550,8 @@ export class Editor {
       ['Health', ph.maxHP, o.maxHP, (v) => v.toFixed(0), 1],
       ['Energy store', ph.maxEnergy, o.maxEnergy, (v) => v.toFixed(0), 1],
       ['Upkeep', ph.upkeep, o.upkeep, (v) => `${v.toFixed(2)}/s`, -1],
-      ['Vision', ph.vision, o.vision, (v) => `${v.toFixed(0)} µm`, 1],
+      ['Sight ahead', ph.sight.ahead, o.sight.ahead, (v) => `${v.toFixed(0)} µm`, 1],
+      ['Sight behind', ph.sight.behind, o.sight.behind, (v) => `${v.toFixed(0)} µm`, 1],
       ['Coldest', ph.tMin, o.tMin, (v) => `${v.toFixed(0)}°C`, -1],
       ['Hottest', ph.tMax, o.tMax, (v) => `${v.toFixed(0)}°C`, 1],
       ['UV limit', ph.uvTol, o.uvTol, pct, 1],
@@ -522,7 +577,11 @@ export class Editor {
       html += `<span class="s-name">${name}</span><span class="s-val">${fmt(v)}</span>${delta}`;
     }
     html += `<span class="s-name">Diet</span><span class="s-val">${ph.diet}</span><span class="s-delta"></span>`;
+    const cl = ph.sight.clarity;
+    const dc = cl - o.sight.clarity;
+    html += `<span class="s-name">Clarity</span><span class="s-val">${CLARITY[cl].short}</span><span class="s-delta ${dc > 0 ? 'up' : dc < 0 ? 'down' : ''}">${dc > 0 ? '▲' : dc < 0 ? '▼' : ''}</span>`;
     $('ed-stat-list').innerHTML = html;
+    this.drawSight(ph, o);
 
     // Habitat forecast.
     const fitHtml = [];
@@ -566,6 +625,66 @@ export class Editor {
     $('ed-done').disabled = cost > dna;
   }
 
+  /** Top-down diagram of what the cell can see, compared with the parent. */
+  drawSight(ph, o) {
+    const cv = $('ed-sight');
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = cv.clientWidth || 140;
+    const H = cv.clientHeight || 140;
+    if (cv.width !== Math.round(W * dpr)) {
+      cv.width = Math.round(W * dpr);
+      cv.height = Math.round(H * dpr);
+    }
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2;
+    const cy = H / 2;
+    const k = (Math.min(W, H) / 2 - 6) / 650;
+    ctx.strokeStyle = 'rgba(120, 200, 255, 0.12)';
+    ctx.fillStyle = 'rgba(169, 195, 214, 0.75)';
+    ctx.font = '10px "JetBrains Mono", monospace';
+    for (const rr of [200, 400, 600]) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr * k, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.fillText('600 µm', cx + 4, cy - 600 * k + 11);
+    const shape = (sp) => {
+      const p = new Path2D();
+      for (let i = 0; i <= BINS; i++) {
+        const b = i % BINS;
+        const a = UP + (b / BINS) * TAU;
+        const r = (sp.base + sp.eye[b]) * k;
+        if (i === 0) p.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+        else p.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      }
+      p.closePath();
+      return p;
+    };
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = 'rgba(169, 195, 214, 0.5)';
+    ctx.stroke(shape(o.sight));
+    ctx.setLineDash([]);
+    const now = shape(ph.sight);
+    ctx.fillStyle = 'rgba(61, 255, 226, 0.14)';
+    ctx.fill(now);
+    ctx.strokeStyle = '#3dffe2';
+    ctx.lineWidth = 1.5;
+    ctx.stroke(now);
+    ctx.fillStyle = `hsl(${this.draft.hue}, 100%, 62%)`;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, TAU);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - 9);
+    ctx.lineTo(cx - 3, cy - 4);
+    ctx.lineTo(cx + 3, cy - 4);
+    ctx.fill();
+    const c = CLARITY[ph.sight.clarity];
+    $('ed-sight-text').innerHTML = `<b>${c.name}.</b> ${c.desc} Dashed: your current body. Eyes see farthest where they face, and less in dark water.`;
+  }
+
   finish() {
     const cost = this.cost();
     const world = this.world;
@@ -573,9 +692,10 @@ export class Editor {
     world.progress.dna -= cost;
     const o = this.offers[this.chosen];
     let newGene = null;
-    if (o && o.kind === 'part' && !world.progress.unlocked.has(o.part)) {
-      world.progress.unlocked.add(o.part);
-      newGene = o.part;
+    const gene = o ? (o.kind === 'part' ? o.part : o.kind === 'upgrade' ? o.to : null) : null;
+    if (gene && !world.progress.unlocked.has(gene)) {
+      world.progress.unlocked.add(gene);
+      newGene = gene;
     }
     const g = cloneGenome(this.draft); // drops editor-only fields
     const name = $('ed-name').value.trim();

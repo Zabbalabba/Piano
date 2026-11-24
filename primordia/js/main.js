@@ -179,6 +179,9 @@ function handleEvents() {
       case 'gene':
         hud.toast(`<b>Gene absorbed: ${e.name}</b>${e.from ? ` from ${e.from}` : ''}. You can now add it when you divide.`, 'gene', 6);
         break;
+      case 'eyeTier':
+        hud.toast(`<b>Your ${e.from.toLowerCase()} can now evolve</b> into an ${e.to.toLowerCase()} when you next divide.`, 'gene', 6);
+        break;
       case 'kill':
         hud.toast(`You consumed a <i>${e.name}</i>.`, '', 3);
         break;

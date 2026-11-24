@@ -805,6 +805,14 @@ export class World {
     sib.vy = Math.sin(a) * 25;
     this.playerSpecies.ref = cloneGenome(newGenome);
     this.playerSpecies.diet = p.ph.diet;
+    // Living with an eye for a generation makes its next tier available.
+    for (const part of newGenome.parts) {
+      const next = PARTS[part.t].evolvesTo;
+      if (next && !pr.unlocked.has(next)) {
+        pr.unlocked.add(next);
+        this.emit('eyeTier', { from: PARTS[part.t].name, to: PARTS[next].name });
+      }
+    }
     this.pressures.reset();
     this.fx.push({ type: 'divide', x: p.x, y: p.y, t: 0, life: 0.8, hue: newGenome.hue });
     this.species.recount();

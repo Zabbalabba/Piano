@@ -13,6 +13,7 @@ export const GOALS = [
   { id: 'gen', text: 'Reach generation 6', done: (w) => w.progress.generation >= 6, prog: (w) => `${Math.min(6, w.progress.generation)}/6` },
   { id: 'pop', text: 'Grow your lineage to 15 living cells', done: (w) => w.progress.peakLineage >= 15, prog: (w) => `${Math.min(15, w.progress.peakLineage)}/15` },
   { id: 'biomes', text: 'Thrive in 2 different habitats', done: (w) => w.progress.biomesThrived.size >= 2, prog: (w) => `${Math.min(2, w.progress.biomesThrived.size)}/2` },
+  { id: 'sight', text: 'Evolve eyes that tell threats from prey', done: (w) => (w.player ? w.player.ph.sight.clarity : 0) >= 2 },
   { id: 'parts', text: 'Evolve a body with 8 parts', done: (w) => (w.player ? w.player.genome.parts.length : 0) >= 8, prog: (w) => `${Math.min(8, w.player ? w.player.genome.parts.length : 0)}/8` },
 ];
 
@@ -99,7 +100,7 @@ function drawChart(cv, world) {
   const ph = h - pad.t - pad.b;
   if (times.length < 2) {
     ctx.fillStyle = '#9bb7b2';
-    ctx.font = '12px Figtree, sans-serif';
+    ctx.font = '12px Manrope, sans-serif';
     ctx.fillText('Population history appears after a few seconds of play.', pad.l, h / 2);
     return;
   }
@@ -151,7 +152,7 @@ function drawChart(cv, world) {
     const hist = s.history.slice(-n);
     const offset = n - hist.length;
     const you = s.id === playerId;
-    ctx.strokeStyle = you ? '#ff9470' : `hsla(${s.hue}, 60%, 62%, 0.85)`;
+    ctx.strokeStyle = you ? '#3dffe2' : `hsla(${s.hue}, 100%, 62%, 0.8)`;
     ctx.lineWidth = you ? 2.5 : 1.5;
     ctx.beginPath();
     hist.forEach((v, i) => {

@@ -2,6 +2,7 @@
 
 import { BIOMES } from './environment.js';
 import { formatTime, clamp } from './util.js';
+import { CLARITY } from './vision.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -57,6 +58,7 @@ export class HUD {
     $('hud-dna').textContent = world.progress.dna;
     $('hud-lineage').textContent = sp ? sp.pop : 1;
     $('hud-diet').textContent = ph.diet;
+    $('hud-sight').textContent = `Sight: ${CLARITY[ph.sight.clarity].short}`;
     $('btn-divide').hidden = !(gr >= 1);
     $('btn-toxin').hidden = !(ph.toxin > 0);
     $('btn-toxin').disabled = p.toxinCd > 0;
