@@ -252,3 +252,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 .levelup.down { border-color: var(--accent); }
 .item.version { padding-left: 26px; min-height: 44px; }
 .item.version b { font-weight: 600; }
+.ex-head .goal { color: var(--text); font-size: 0.84rem; margin-top: 4px; line-height: 1.35; }
+.ex-head .goal b { color: var(--accent); font-weight: 600; }
+@media (orientation: landscape) and (max-height: 500px) { .ex-head .goal { display: none; } }

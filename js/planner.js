@@ -111,9 +111,12 @@ export function setAside(state, id) {
   return easier;
 }
 
+// done: secure or further, known: marked as known from your level (not practised).
 export function trackProgress(state, track) {
   const items = TRACK_ITEMS[track];
-  return { done: items.filter((x) => isDone(state, x.id)).length, total: items.length };
+  const mastered = items.filter((x) => prog(state, x.id).st === 'mastered').length;
+  const known = items.filter((x) => prog(state, x.id).st === 'skipped').length;
+  return { done: mastered + known, mastered, known, total: items.length };
 }
 
 function dueReviews(state, now, exclude) {
@@ -260,9 +263,8 @@ export function allocate(slots, minutes) {
   return list;
 }
 
-// Playing this much faster than the target tempo, and solidly, masters an exercise in one go.
+// Securing an exercise this far above its target counts as a fast one, towards a level-up offer.
 export const FAST_FACTOR = 1.15;
-const FAST_REVIEW_DAYS = 7;
 // After this many solid ratings in a row at full tempo, new exercises start at full tempo too.
 const PACE_RUN = 3;
 
@@ -288,14 +290,22 @@ export function speedCheckStep(results, current, count) {
   return { level: best + 1 || 1, speed };
 }
 
-// ---- rising targets for technique
+// ---- stages of mastery
 //
-// Scales, arpeggios and other technique exercises get faster over time: each Solid rating at (or
-// near) the target raises it to whichever is higher, your tempo + 5% or the old target + 10%. It
-// stops at about 170 notes a minute (or 2.4 times the starting target, for slow chord exercises).
-// Genre exercises and pieces keep their target: that is the tempo the music is meant to have.
+// Every exercise has three stages, each reached with Solid ratings on two different days:
+//   1 Secure       Solid at the target tempo. This is what "mastered" means.
+//   2 Fluent       speed exercises: Solid at about 25% above the target;
+//                  feel exercises: relaxed and steady through several repeats, eyes mostly off the screen.
+//   3 In the style speed exercises: Solid at the tempo the music is usually played (technique: about
+//                  170 notes a minute); feel exercises: Solid against a goal written for the exercise.
+// Exercises with a written goal (item.goal) are feel exercises; all others are speed exercises.
+// A Solid rating on a speed exercise counts towards every stage whose tempo it reaches, so playing
+// well above the target moves you on faster, but each stage still needs two different days.
+export const STAGES = ['Learning', 'Secure', 'Fluent', 'In the style'];
 const NOTES_PER_MINUTE_CAP = 170;
-export const rises = (item) => item.track === 'technique';
+const DAYS_PER_STAGE = 2;
+const TEMPO_SLACK = 0.97; // a beat or two under the stage tempo still counts
+export const isFeel = (item) => !!item.goal;
 
 // Notes per beat in the busiest hand, e.g. 1 for a quarter-note scale, 2 for eighth notes.
 function density(item) {
@@ -304,13 +314,50 @@ function density(item) {
   return Math.max(perHand('R'), perHand('L')) / p.totalBeats;
 }
 
+// Fastest sensible target for technique: about 170 notes a minute (or 2.4 times the starting
+// target, for slow chord exercises).
 export function maxTarget(item) {
   return Math.round(Math.min(item.bpm * 2.4, NOTES_PER_MINUTE_CAP / Math.max(0.25, density(item))));
 }
 
+// The tempo for stages 1, 2 and 3.
+export function stageTempos(item) {
+  if (isFeel(item)) return [item.bpm, item.bpm, item.bpm];
+  const top = Math.max(Math.round(item.bpm * 1.3), item.perf || (item.track === 'technique' ? maxTarget(item) : Math.round(item.bpm * 1.4)));
+  const mid = Math.min(Math.round(item.bpm * 1.25), top);
+  return [item.bpm, mid, top];
+}
+
+export const stageOf = (state, item) => (state.items[item.id] && state.items[item.id].stage) || 0;
+
+// The tempo you are working towards now: the next stage's tempo (the last one once all are done).
 export function targetOf(state, item) {
+  return stageTempos(item)[Math.min(stageOf(state, item), 2)];
+}
+
+// Days with a Solid rating counted towards the stage you are working on.
+export function stageDays(state, item) {
   const p = state.items[item.id];
-  return (p && p.target) || item.bpm;
+  const s = Math.min(stageOf(state, item) + 1, 3);
+  return (p && p.days && p.days[s] ? p.days[s].length : 0);
+}
+
+// What to aim for now, in words.
+export function stageGoal(state, item) {
+  const s = stageOf(state, item);
+  const [t1, t2, t3] = stageTempos(item);
+  const days = stageDays(state, item);
+  const twice = s < 3 ? ` Solid on two different days${days ? ` (${days} of 2 done)` : ''}.` : '';
+  if (s === 0) return `Secure: play it Solid at ${t1} bpm.${twice}`;
+  if (isFeel(item)) {
+    if (s === 1) return `Fluent: relaxed and steady through several repeats, with your eyes mostly off the screen.${twice}`;
+    if (s === 2) return `In the style: ${item.goal}${twice}`;
+    return `Keep refining: ${item.goal}`;
+  }
+  if (s === 1) return `Fluent: Solid at ${t2} bpm.${twice}`;
+  const usual = item.track === 'technique' ? 'a fluent scale tempo' : 'a tempo it is often played at';
+  if (s === 2) return `Full tempo: Solid at ${t3} bpm, ${usual}.${twice}`;
+  return `All three stages done. Keep it fresh at ${t3} bpm.`;
 }
 
 // Tempo a new exercise starts at: 70% of the target, or more once you have shown you are faster
@@ -323,70 +370,88 @@ export function startTempo(state, item) {
   if (base && base.bpm) return Math.round(base.bpm * 0.85);
   let factor = (state.pace || 0) >= PACE_RUN ? 1 : 0.7;
   if (state.speed) factor = Math.max(factor, Math.min(1.5, state.speed * 0.85));
-  return Math.round(targetOf(state, item) * factor);
+  return Math.round(item.bpm * factor);
 }
 
 // Whether you have played this exercise at (nearly) its target tempo yet. If not, it opens with a demo.
 export function knowsExercise(state, item) {
   const p = state.items[item.id];
-  return !!p && (p.st === 'mastered' || (p.top || 0) >= targetOf(state, item) * 0.9);
+  return !!p && ((p.stage || 0) >= 1 || (p.top || 0) >= item.bpm * 0.9);
 }
 
 export const suggestLevelUp = (state) => (state.fastRun || 0) >= LEVEL_UP_RUN && state.profile.level.play < 3;
+
+const dayOf = (ts) => {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+};
 
 // rating: 'hard' | 'ok' | 'solid'
 export function applyRating(state, id, rating, tempo, now = Date.now()) {
   const item = ITEM_BY_ID[id];
   const p = (state.items[id] = { ...prog(state, id) });
-  const wasMastered = p.st === 'mastered';
+  p.days = { ...(p.days || {}) };
+  const before = p.stage || 0;
+  const tempos = stageTempos(item);
+  const target = tempos[Math.min(before, 2)];
   p.reps += 1;
   p.last = now;
-  p.bpm = tempo;
   if (rating !== 'hard') p.top = Math.max(p.top || 0, tempo);
   p.hardRun = rating === 'hard' ? (p.hardRun || 0) + 1 : 0;
-  const target = targetOf(state, item);
-  const atTempo = tempo >= target * 0.9;
-  const fast = rating === 'solid' && tempo >= target * FAST_FACTOR;
-  let becameMastered = false;
+  const atTempo = tempo >= target * TEMPO_SLACK;
+  const today = dayOf(now);
+  const addDay = (s) => {
+    const list = p.days[s] || [];
+    if (!list.includes(today)) p.days[s] = [...list, today];
+  };
 
-  if (wasMastered) {
-    if (rating === 'solid') p.ivl = Math.min(60, Math.round(p.ivl * 2.2));
-    else if (rating === 'ok') p.ivl = Math.max(2, p.ivl);
-    else {
-      p.st = 'learning';
-      p.solid = 0;
+  if (rating === 'solid') {
+    if (isFeel(item)) {
+      if (before < 3 && tempo >= item.bpm * 0.9) addDay(before + 1);
+    } else {
+      for (let s = before + 1; s <= 3; s++) if (tempo >= tempos[s - 1] * TEMPO_SLACK) addDay(s);
     }
-    if (p.st === 'mastered') p.due = now + p.ivl * DAY;
+    let s = before;
+    while (s < 3 && (p.days[s + 1] || []).length >= DAYS_PER_STAGE) s += 1;
+    p.stage = s;
+  } else if (rating === 'hard') {
+    // A hard day: the days counted towards the stage you are working on start again.
+    if (before < 3) p.days[before + 1] = [];
+  }
+  const stage = p.stage || 0;
+  const becameMastered = before === 0 && stage >= 1;
+
+  // Tempo to start at next time.
+  if (rating === 'hard') p.bpm = Math.max(Math.round(item.bpm * 0.5), Math.round(tempo * 0.9));
+  else if (rating === 'solid' && !atTempo) p.bpm = Math.min(target, Math.round(tempo * 1.12));
+  else p.bpm = tempo;
+
+  if (stage >= 1) {
+    p.st = 'mastered';
+    if (becameMastered) p.masteredAt = state.sessions;
+    // Reviews: every few days while stages remain; afterwards growing gaps, but feel exercises
+    // keep coming back every week or two for refinement.
+    const cap = stage < 3 ? 5 : isFeel(item) ? 14 : 60;
+    if (becameMastered) p.ivl = 3;
+    else if (rating === 'solid') p.ivl = Math.min(cap, Math.round((p.ivl || 3) * (stage < 3 ? 1.5 : 2.2)));
+    else if (rating === 'ok') p.ivl = Math.max(2, Math.min(p.ivl || 3, 5));
+    else p.ivl = 2;
+    p.due = now + p.ivl * DAY;
   } else {
     p.st = 'learning';
-    if (rating === 'hard') {
-      p.solid = 0;
-      p.bpm = Math.max(Math.round(target * 0.5), Math.round(tempo * 0.9));
-    } else if (rating === 'solid') {
-      if (atTempo) p.solid += 1;
-      else p.bpm = Math.min(target, Math.round(tempo * 1.12));
-      // Solid and clearly faster than planned: no need to prove it twice, and the review can wait longer.
-      if (p.solid >= 2 || fast) {
-        p.st = 'mastered';
-        p.masteredAt = state.sessions;
-        p.ivl = fast ? FAST_REVIEW_DAYS : 3;
-        p.due = now + p.ivl * DAY;
-        becameMastered = true;
-      }
-    }
   }
+
   // A run of solid ratings at full tempo means the slow start is not needed for the next new exercise.
-  // Technique: Solid at (or near) the target raises it, so the exercise keeps you growing.
-  let newTarget = null;
-  if (rises(item) && rating === 'solid' && atTempo && p.st === 'mastered') {
-    const next = Math.min(maxTarget(item), Math.max(Math.round(tempo * 1.05), Math.round(target * 1.1)));
-    if (next > target) { p.target = next; newTarget = next; }
-  }
-  if (rating === 'solid' && tempo >= target) state.pace = (state.pace || 0) + 1;
-  else if (rating === 'hard' || (rating === 'solid' && !atTempo)) state.pace = 0;
-  if (becameMastered && fast) state.fastRun = (state.fastRun || 0) + 1;
+  if (rating === 'solid' && tempo >= item.bpm) state.pace = (state.pace || 0) + 1;
+  else if (rating === 'hard' || (rating === 'solid' && tempo < item.bpm * 0.9)) state.pace = 0;
+  const fast = becameMastered && tempo >= item.bpm * FAST_FACTOR;
+  if (fast) state.fastRun = (state.fastRun || 0) + 1;
   else if (becameMastered || rating === 'hard') state.fastRun = 0;
-  return { becameMastered, fast: becameMastered && fast, atTempo, nextTempo: p.bpm, target, newTarget, hardTwice: p.hardRun >= 2 };
+  return {
+    becameMastered, fast, atTempo, target, nextTempo: p.bpm,
+    stageUp: stage > before ? stage : 0, stage, daysToward: stageDays(state, item),
+    hardTwice: p.hardRun >= 2,
+  };
 }
 
 // Record a finished (or partly finished) session and move the queue on.
@@ -399,16 +464,55 @@ export function completeSession(state, result, now = Date.now()) {
   state.history.push({ d: now, min: Math.round(minutes * 10) / 10, n: done.length, extras, core: done.length > 0 });
 }
 
-// Mark exercises below the assessed level as known, so the queue starts in the right place.
+// Levels only mark technique and foundation exercises below your level as known. Genre exercises
+// are never skipped: being fast at scales says nothing about swing or bossa nova. If they are easy
+// for you, they start at your tempo and are quickly secure.
+const SKIPPABLE = ['technique', 'foundations'];
 export function applyLevel(state, level) {
   state.profile.level.play = level;
-  for (const items of Object.values(TRACK_ITEMS)) {
+  for (const [track, items] of Object.entries(TRACK_ITEMS)) {
     for (const it of items) {
       const p = state.items[it.id];
-      if (it.lv < level && (!p || p.st === 'new')) state.items[it.id] = { st: 'skipped', solid: 0, reps: 0 };
-      if (it.lv >= level && p && p.st === 'skipped') delete state.items[it.id];
+      const skip = SKIPPABLE.includes(track) && it.lv < level;
+      if (skip && (!p || p.st === 'new')) state.items[it.id] = { st: 'skipped', solid: 0, reps: 0 };
+      if (!skip && p && p.st === 'skipped') delete state.items[it.id];
     }
   }
+}
+
+// Bring progress saved before the stages up to date. Mastery used to come from one fast Solid
+// rating; now it takes two days. Mastered exercises with two Solid ratings stay secure; the others
+// keep the day they were rated as one of two. Genre exercises marked as known become new again.
+export function migrateProgress(state) {
+  for (const [id, p] of Object.entries(state.items)) {
+    const item = ITEM_BY_ID[id];
+    if (!item) continue;
+    if (p.st === 'skipped' && !SKIPPABLE.includes(item.track)) {
+      delete state.items[id];
+      continue;
+    }
+    if (p.stage !== undefined || p.st === 'skipped') continue;
+    const tempos = stageTempos(item);
+    const day = p.last ? dayOf(p.last) : null;
+    p.days = {};
+    delete p.target;
+    if (p.st === 'mastered' && (p.solid || 0) >= 2) {
+      p.stage = 1;
+      if (day && !isFeel(item) && (p.top || 0) >= tempos[1] * TEMPO_SLACK) p.days[2] = [day];
+      p.ivl = Math.min(p.ivl || 3, 5);
+    } else {
+      p.stage = 0;
+      if (p.st === 'mastered' || (p.solid || 0) >= 1) {
+        if (day) p.days[1] = [day];
+        if (day && !isFeel(item) && (p.top || 0) >= tempos[1] * TEMPO_SLACK) p.days[2] = [day];
+      }
+      p.st = (p.reps || 0) > 0 || p.bpm ? 'learning' : p.st;
+      delete p.due;
+      delete p.ivl;
+    }
+  }
+  state.fastRun = 0;
+  return state;
 }
 
 // The opening of a piece, trimmed to at most ten seconds, used as a genre sample.
@@ -485,6 +589,7 @@ export function newState(now = Date.now()) {
       modules: { ear: true, reading: true, pieces: true }, metronome: true, guide: true, fingers: true, quizCount: 10,
     },
     items: {},
+    progressV: 2,
     rot: 0,
     pace: 0,
     fastRun: 0,

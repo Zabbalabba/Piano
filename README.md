@@ -33,9 +33,12 @@ and installs to a phone's home screen.
   and after new exercises) in a new key that suits the genre, up to three keys each, e.g. jazz in F,
   B♭ and G. Notes, key signature and fingering are worked out by the app; each key version starts at
   85% of your tempo on the original. Scales have their own keys; pieces stay in theirs.
-- **Rising targets for technique**: each Solid rating at or near the target raises it (your tempo + 5%,
-  or the old target + 10%, whichever is higher), up to about 170 notes a minute. Above about 120 the
-  click moves to every second beat. Genre exercises and pieces keep their musical tempo.
+- **Three stages of mastery**: Secure (Solid at the target on two different days), Fluent and In the
+  style. Speed exercises move through tempos (target, about 25% faster, and a tempo the music is often
+  played at; scales up to about 170 notes a minute). Feel exercises move through goals (relaxed and
+  steady, then a written goal for the style) and keep coming back every week or two to refine. Each
+  stage needs Solid on two different days. Levels only mark technique and foundation exercises as
+  known; genre exercises are never skipped.
 - **Skill check** at setup (note reading, ear, sight-reading passages and a speed check on real exercises), **ear training** and **note reading** as optional extras or on their own.
 - **Progress** centred on a weekly goal rather than a daily streak.
 - **Evening mode**: a dim, warm theme with dark sheet music, switchable by hand or automatically at night.
@@ -57,12 +60,12 @@ and installs to a phone's home screen.
   in the stats and moves the queue on.
 - There is no calendar. The queue only moves when you play, so skipped or extra sessions need no
   special handling.
-- An exercise is mastered after two "Solid" ratings at (or near) its target tempo. It then returns
-  for review after 3 days, with the gap growing each time.
-- Solid at 15% or more above the target tempo masters an exercise in one go, with the first review
-  after a week. After three solid ratings in a row at full tempo, new exercises start at full tempo
-  instead of 70%. The skill check's speed result raises the starting tempo the same way.
-- After three exercises in a row mastered well above tempo, the app offers to move you up a level.
+- An exercise is secure after Solid ratings at its target tempo on two different days. It then
+  returns every few days for the next stage, and at growing gaps once all stages are done.
+- Playing well above the target counts towards later stages too, but every stage still needs two
+  days. After three solid ratings in a row at full tempo, new exercises start at full tempo instead
+  of 70%. The skill check's speed result raises the starting tempo the same way.
+- After three exercises in a row secured well above tempo, the app offers to move you up a level.
 
 ## Run it
 

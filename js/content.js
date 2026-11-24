@@ -1135,6 +1135,102 @@ for (const g of GENRES) {
   }));
 }
 
+// ---------------------------------------------------------------- stages of mastery
+//
+// Speed exercises (perf): the third stage is Solid at a tempo this is commonly played at.
+// Feel exercises (goal): faster is not better; the third stage is Solid against this goal, and they
+// keep coming back for refinement. Goals are written as things you can check for yourself.
+const STAGE_INFO = {
+  'fd-rh': { perf: 100 },
+  'fd-lh': { perf: 100 },
+  'fd-turns': { goal: 'The beat carries straight on through every hand change, with no hesitation before a new hand comes in.' },
+  'fd-bass': { goal: 'The bass notes ring for their full length while the tune moves above them, smooth and unhurried.' },
+  'fd-chords': { perf: 96 },
+  'fd-melody-chords': { goal: 'The tune is clearly louder than the chords, and the chords change without a gap.' },
+  'fd-eighths': { perf: 100 },
+
+  'cl-ode-r': { goal: 'Every note joins the next with no gaps or bumps, and each phrase rises and falls like a singer would shape it.' },
+  'cl-ode-bass': { goal: 'The melody sings over quiet bass notes that last their full length.' },
+  'cl-alberti': { perf: 112 },
+  'cl-run': { perf: 116 },
+  'cl-melody-alberti': { perf: 108 },
+
+  'jz-swing': { goal: 'The long–short feel comes without thinking, and the off-beats lean forward slightly. Hum along: it should feel like walking, not marching.' },
+  'jz-shells': { goal: 'Each shape lands without looking, and the top notes move smoothly from chord to chord.' },
+  'jz-251': { goal: 'Swung and relaxed, with the line flowing into each new chord instead of stopping on it.' },
+  'jz-walk': { perf: 160 },
+  'jz-charleston': { goal: 'Short, crisp chords, with the second one landing confidently just before beat three every time.' },
+
+  'bl-form': { goal: 'You keep your place through all twelve bars without counting out loud, and feel each chord change coming.' },
+  'bl-shuffle': { perf: 132 },
+  'bl-scale': { perf: 132 },
+  'bl-call': { goal: 'The left hand rolls on unchanged while the right hand phrases freely, with real silence between the licks.' },
+  'bl-boogie': { perf: 160 },
+
+  'rg-oompah': { perf: 112 },
+  'rg-chromatic': { perf: 112 },
+  'rg-synco': { goal: 'The off-beat notes bounce against a rock-steady left hand, without the tune pulling the beat.' },
+  'rg-together': { perf: 100 },
+  'rg-stride': { perf: 104 },
+
+  'pp-four': { goal: 'Chords change smoothly with no gaps, and you can play through without watching your hands.' },
+  'pp-pulse': { goal: 'Every chord at the same volume with a loose wrist. It could carry a whole song.' },
+  'pp-broken': { goal: 'Flowing and even, the bass note a touch stronger, no bump when the hand opens to the octave.' },
+  'pp-melody': { goal: 'The tune sings clearly above a flowing accompaniment that runs without your attention.' },
+  'pp-332': { goal: 'The 3+3+2 grooves without counting, and the accents feel natural rather than placed.' },
+
+  'rk-power': { perf: 140 },
+  'rk-eighths': { perf: 140 },
+  'rk-riff': { perf: 130 },
+  'rk-rnr': { perf: 160 },
+  'rk-stabs': { perf: 132 },
+
+  'gs-amen': { goal: 'Full, warm chords with every note sounding together, ringing into each other without blurring.' },
+  'gs-waltz': { goal: 'A strong bass on one and light chords on two and three: it sways rather than marches.' },
+  'gs-walkup': { goal: 'Each walk-up grows slightly louder and leads naturally into the new chord.' },
+  'gs-passing': { goal: 'You hear each changed note pulling towards the next chord, and the changes sound connected.' },
+  'gs-128': { goal: 'A rolling three-to-a-beat feel with a gentle lean on each group, unhurried and even.' },
+
+  'rb-backbeat': { goal: 'Chords sit exactly on two and four, locked with the bass like a drummer and bass player.' },
+  'rb-sevenths': { goal: 'Each seventh chord sounds full and balanced, and the changes are smooth without looking.' },
+  'rb-melody': { goal: 'Phrased like a singer: slightly behind the beat, with each phrase shaped rather than played note by note.' },
+  'rb-68': { goal: 'Six flowing notes per bar, soft and even, with a small lean on 1 and 4.' },
+  'rb-groove': { goal: 'The bass line grooves on its own, and the chords drop in on two and four without disturbing it.' },
+
+  'fu-one': { goal: 'Tight and precise: short notes, and silences that land exactly in time.' },
+  'fu-offbeat': { goal: 'Every chord short and exactly between the beats, with your foot steady on the beat.' },
+  'fu-riff': { perf: 108 },
+  'fu-octave': { perf: 108 },
+  'fu-both': { goal: 'The hands interlock without thinking, and it grooves at a steady tempo for a full minute.' },
+
+  'lt-bossa-bass': { goal: 'Gentle and steady, with the short note always leading into the next long one.' },
+  'lt-habanera': { goal: 'The long, short, long, long rhythm sways, and the melody floats on top of it.' },
+  'lt-comp': { goal: 'The off-beat chords feel natural rather than counted, light and evenly spaced.' },
+  'lt-bossa': { goal: 'The bass never wavers and the chords sit lightly between its notes. You could keep it going for a minute while humming a melody.' },
+  'lt-montuno': { perf: 132 },
+
+  'fk-drone': { goal: 'The drone rings softly underneath while the tune moves freely above it.' },
+  'fk-waltz': { goal: 'A strong first beat and two light chords: it sways like a dance.' },
+  'fk-picking': { goal: 'Rolling and even like a fingerpicked guitar, quiet enough to sing over.' },
+  'fk-sus': { goal: 'You hear the tension in each sus chord and its release, and shape the resolution gently.' },
+  'fk-scarb': { goal: 'The melody moves in long phrases over a ringing bass, never rushed.' },
+
+  'ct-penta': { perf: 120 },
+  'ct-boom': { perf: 120 },
+  'ct-walk': { perf: 120 },
+  'ct-slip': { goal: 'The slip sounds like a quick slide into the note, with the top note held clean above it.' },
+  'ct-both': { perf: 112 },
+
+  'fm-fifths': { goal: 'Each sound starts softly and is allowed to ring. Silence and tone matter more than the notes.' },
+  'fm-arp': { goal: 'Every note the same soft volume, with no bumps where the hand moves.' },
+  'fm-ostinato': { goal: 'The pattern stays perfectly even through every change, and the bass notes carry the emotion.' },
+  'fm-melody': { goal: 'The long melody notes sing above a quiet, flowing left hand.' },
+  'fm-332': { goal: 'The 3+3+2 pulse feels effortless, the left hand locked to the first note of each group.' },
+};
+for (const items of Object.values(TRACK_ITEMS)) {
+  items.forEach((it, i) => { if (STAGE_INFO[it.id]) items[i] = { ...it, ...STAGE_INFO[it.id] }; });
+}
+
 // ---------------------------------------------------------------- the same exercises in new keys
 //
 // Once you master a genre or foundation exercise, it comes back later in a new key: the same skill

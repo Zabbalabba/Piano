@@ -4,7 +4,7 @@ import { GENRES, TRACK_ITEMS, PIECE_ITEMS, TRACK_INFO, ITEM_BY_ID, ASSESS_PASSAG
 import { parseExercise, noteToMidi } from './music.js';
 import {
   newState, buildSession, structureFor, lengthBounds, applyRating, completeSession, applyLevel,
-  startTempo, nextPiece, FAST_FACTOR, targetOf, versionsShown, knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
+  startTempo, nextPiece, FAST_FACTOR, targetOf, versionsShown, stageGoal, stageTempos, isFeel, STAGES, migrateProgress, knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, sampleBars, stats, trackProgress, rotates, ROTATE_FROM, MODULES_FROM,
 } from './planner.js';
 import { unlock, playEvents, playNote, chime, audio, silence, loadPiano } from './audio.js';
 import { startInput, stopInput, inputMode, midiSupported, micSupported } from './input.js';
@@ -32,6 +32,7 @@ function load() {
     if (saved && saved.v === 1) {
       return {
         ...base, ...saved,
+        progressV: saved.progressV || 1,
         profile: { ...base.profile, ...saved.profile, level: { ...base.profile.level, ...(saved.profile || {}).level } },
         settings: { ...base.settings, ...saved.settings, modules: { ...base.settings.modules, ...(saved.settings || {}).modules } },
         quiz: {
@@ -59,6 +60,12 @@ function migrate(st) {
       if (h.core === false && (h.extras || []).length && h.extras.every((x) => x === 'ear' || x === 'read') && h.min > 15) h.min = 5;
     }
     st.quiz.levels = 2;
+  }
+  if ((st.progressV || 1) < 2) {
+    // Stages of mastery: two days per stage instead of mastering in one go, and genre exercises
+    // are never skipped by level.
+    migrateProgress(st);
+    st.progressV = 2;
   }
   return st;
 }
@@ -765,8 +772,10 @@ function nextSlot() {
     onDone: (r) => {
       session.done.push(slot);
       session.seconds += Math.min(r.seconds, slot.minutes * 120);
+      if (r.info.stageUp) {
+        session.news.push(`${STAGES[r.info.stageUp]}: ${slot.item.t}`);
+      }
       if (r.info.becameMastered) {
-        session.news.push(slot.item.t);
         if (slot.item.kind === 'focus' && slot.item.track !== 'foundations') session.mastered += 1;
       }
       session.i += 1;
@@ -813,9 +822,9 @@ function summary() {
   show(`<main class="page center summary">
     <h1>${s.done.length ? 'Session done' : 'Session ended'}</h1>
     <p class="lead">${s.done.length ? `${minutes} min · ${s.done.length} ${s.done.length === 1 ? 'exercise' : 'exercises'}` : 'Nothing was recorded. The same exercises will be waiting.'}</p>
-    ${s.news.map((t) => `<p class="win">Mastered: ${esc(t)}</p>`).join('')}
+    ${s.news.map((t) => `<p class="win">${esc(t)}</p>`).join('')}
     <div class="card"><p class="muted">${st.weekDays >= st.goal ? 'Weekly goal reached.' : `${st.weekDays} of ${st.goal} practice days this week`}</p>${weekDots(st)}</div>
-    ${suggestLevelUp(S) ? `<div class="card levelup"><p><b>You are mastering exercises well above tempo.</b> Move up to ${LEVELS[S.profile.level.play + 1]}? Easier exercises you have not done yet will be marked as known.</p>
+    ${suggestLevelUp(S) ? `<div class="card levelup"><p><b>You are mastering exercises well above tempo.</b> Move up to ${LEVELS[S.profile.level.play + 1]}? Easier technique and foundation exercises you have not done yet will be marked as known. Genre exercises stay.</p>
       <div class="two-btns"><button class="btn" data-act="notNow">Not now</button><button class="btn primary" data-act="levelUp">Move up</button></div></div>` : ''}
     ${offer && tiles ? `<h2>Add something? Entirely optional.</h2><div class="tiles">${tiles}</div>` : ''}
     <div class="foot"><button class="btn primary" data-act="finish">Finish</button></div>
@@ -881,6 +890,7 @@ function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
       <h1>${esc(item.t)}</h1>
       <p>${esc(item.focus)}</p>
       <p class="gain"><b>What it does for you:</b> ${esc(item.gain)}</p>
+      <p class="goal"><b>Your goal now:</b> ${esc(stageGoal(S, item))}</p>
       <details><summary>How to practise it</summary><p>${esc(item.tip)}${item.swing ? ' Swing feel: play the eighth notes long–short.' : ''}${item.src ? ` <span class="muted">(${esc(item.src)})</span>` : ''}</p></details>
     </div>
     <div class="stage" id="stage"></div>
@@ -923,7 +933,7 @@ function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
         <div class="stack">
           <button class="btn" data-act="rate" data-v="hard"><b>Hard</b><small>Slow it down next time</small></button>
           <button class="btn" data-act="rate" data-v="ok"><b>Getting there</b><small>Keep it as it is</small></button>
-          <button class="btn" data-act="rate" data-v="solid"><b>Solid</b><small>Ready for more</small></button>
+          <button class="btn" data-act="rate" data-v="solid"><b>Solid</b><small id="solidSub">You met the goal</small></button>
         </div>
         <button class="link" data-act="resume">Keep practising</button>
         <button class="link tight" data-act="tooHard">Too hard for now? Build up to it first</button>
@@ -1084,9 +1094,14 @@ function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
       player.stop();
       rating = true;
       const hint = $('rateHint');
-      if (best !== null) hint.textContent = `Best pass: ${best}%. ${best >= 85 ? 'That points to Solid.' : best >= 60 ? 'That points to Getting there.' : 'That points to Hard.'}`;
-      else if (tempo >= target * FAST_FACTOR) hint.textContent = `You played at ${tempo} bpm, well above the target of ${target}. Solid at this speed masters it straight away.`;
-      else hint.textContent = tempo < target * 0.9 ? `You played at ${tempo} bpm. The target is ${target}.` : '';
+      const goalNow = stageGoal(S, item);
+      let tempoNote = '';
+      if (!isFeel(item)) {
+        const reached = stageTempos(item).map((t, i) => (tempo >= t * 0.97 && i + 1 > (S.items[item.id] || {}).stage ? STAGES[i + 1] : null)).filter(Boolean);
+        tempoNote = reached.length ? `At ${tempo} bpm, Solid counts towards: ${reached.join(', ')}.` : `You played at ${tempo} bpm; the tempo for this stage is ${target}.`;
+      }
+      const pass = best !== null ? `Best pass: ${best}%. ` : '';
+      hint.textContent = `${pass}Your goal: ${goalNow} ${tempoNote}`;
       $('rate').hidden = false;
     },
     resume: () => { rating = false; $('rate').hidden = true; },
@@ -1102,10 +1117,8 @@ function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
         $('twice').hidden = false;
         return;
       }
-      if (info.newTarget && info.becameMastered) toast(`Mastered. When it comes back for review, the new target is ${info.newTarget} bpm.`);
-      else if (info.newTarget) toast(`Solid. New target: ${info.newTarget} bpm.`);
-      else if (info.fast) toast('Well above tempo: mastered in one go. It comes back for review in a week.');
-      else if (info.becameMastered) toast('Mastered. It comes back for a quick review in a few days.');
+      if (info.stageUp) toast(`${STAGES[info.stageUp]}!${info.stage < 3 ? ' It comes back in a few days for the next stage.' : isFeel(item) ? ' It keeps coming back every week or two to refine.' : ' All three stages done.'}`);
+      else if (el.dataset.v === 'solid' && info.daysToward === 1) toast('One day of two for this stage. Play it Solid again on another day.');
       else if (el.dataset.v === 'solid' && !info.atTempo) toast(`Next time a little faster: ${info.nextTempo} bpm.`);
       else if (el.dataset.v === 'hard') toast(`Next time a little slower: ${info.nextTempo} bpm.`);
       finishRating();
@@ -1125,9 +1138,11 @@ function runExercise({ item, minutes, label, onDone, onQuit, onSwap }) {
 function statusOf(id) {
   const p = S.items[id];
   if (!p || p.st === 'new') return ['new', 'Not started'];
-  if (p.st === 'skipped') return ['known', 'Below your level'];
-  if (p.st === 'mastered') return ['mastered', 'Mastered'];
-  return ['learning', `Learning · ${p.bpm} bpm`];
+  if (p.st === 'skipped') return ['known', 'Known from your level'];
+  const stage = p.stage || 0;
+  if (stage >= 1) return ['mastered', `${STAGES[stage]} ${'●'.repeat(stage)}${'○'.repeat(3 - stage)}`];
+  const days = (p.days && p.days[1] && p.days[1].length) || 0;
+  return ['learning', `Learning · ${p.bpm} bpm${days ? ' · 1 of 2 days' : ''}`];
 }
 
 function library(focus) {
@@ -1143,10 +1158,10 @@ function library(focus) {
     const info = TRACK_INFO[track];
     const pr = trackProgress(S, track);
     const pieces = PIECE_ITEMS[track];
-    return `<details class="track" ${open ? 'open' : ''}><summary><span><b>${esc(info.name)}</b><small>${pr.done} of ${pr.total} done</small></span>
+    return `<details class="track" ${open ? 'open' : ''}><summary><span><b>${esc(info.name)}</b><small>${pr.mastered} of ${pr.total} secure${pr.known ? ` · ${pr.known} known from your level` : ''}</small></span>
       <span class="bar"><i style="width:${(100 * pr.done) / pr.total}%"></i></span></summary>
       ${focus === 'pieces' ? '' : TRACK_ITEMS[track].map((it) => itemRow(it) + versionsShown(S, it.id).map((v) => itemRow(v, true)).join('')).join('')}
-      ${pieces ? `<h3>Pieces</h3>${pieces.map(itemRow).join('')}` : ''}</details>`;
+      ${pieces ? `<h3>Pieces</h3>${pieces.map((it) => itemRow(it)).join('')}` : ''}</details>`;
   };
   const core = focus === 'pieces' ? '' : section('technique', false) + section('foundations', false);
   show(`<main class="page">
@@ -1195,7 +1210,7 @@ function progress() {
     <h2>Where you are</h2>
     <section class="card rows">${tracks.map((t) => {
       const pr = trackProgress(S, t);
-      return `<div class="row"><span><b>${esc(TRACK_INFO[t].name)}</b><small>${pr.done} of ${pr.total}</small></span><span class="bar wide"><i style="width:${(100 * pr.done) / pr.total}%"></i></span></div>`;
+      return `<div class="row"><span><b>${esc(TRACK_INFO[t].name)}</b><small>${pr.mastered} of ${pr.total} secure${pr.known ? ` · ${pr.known} known` : ''}</small></span><span class="bar wide"><i style="width:${(100 * pr.done) / pr.total}%"></i></span></div>`;
     }).join('')}
       <div class="row"><span><b>Note reading</b><small>${READ_LEVELS[S.profile.level.read]}</small></span><span class="lvl">Level ${S.profile.level.read}</span></div>
       <div class="row"><span><b>Ear</b><small>${EAR_LEVELS[S.profile.level.ear]}</small></span><span class="lvl">Level ${S.profile.level.ear}</span></div>

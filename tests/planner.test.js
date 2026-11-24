@@ -4,6 +4,7 @@ import {
   newState, buildSession, structureFor, allocate, applyRating, completeSession, applyLevel,
   lengthBounds, stats, weekStart, DAY, nextPiece, startTempo, FAST_FACTOR,
   knowsExercise, suggestLevelUp, speedCheckStep, setAside, easierThan, targetOf, maxTarget,
+  stageTempos, stageOf, stageGoal, migrateProgress, trackProgress,
   remaining, versionsShown,
 } from '../js/planner.js';
 import { TRACK_ITEMS, ITEM_BY_ID, KEY_VERSIONS } from '../js/content.js';
@@ -90,15 +91,6 @@ test('skipping or adding sessions never loses anything: the queue only moves whe
   assert.deepEqual(ids(a), ids(b));
 });
 
-test('two solid ratings at tempo master an exercise and schedule a review', () => {
-  const s = mk(10, 5);
-  const id = 'tq-five-r';
-  const bpm = ITEM_BY_ID[id].bpm;
-  assert.equal(applyRating(s, id, 'solid', bpm, 0).becameMastered, false);
-  assert.equal(applyRating(s, id, 'solid', bpm, 0).becameMastered, true);
-  assert.equal(s.items[id].due, 3 * DAY);
-  assert.notEqual(buildSession(s, 10).slots[0].item.id, id);
-});
 
 test('solid below tempo raises the tempo instead of counting towards mastery', () => {
   const s = mk(10, 5);
@@ -160,14 +152,6 @@ test('weekly stats', () => {
   assert.equal(new Date(weekStart(now)).getDay(), 1);
 });
 
-test('solid and clearly faster than planned masters at once, with a later review', () => {
-  const s = mk(10, 5);
-  const item = ITEM_BY_ID['tq-five-r'];
-  const r = applyRating(s, item.id, 'solid', Math.ceil(item.bpm * FAST_FACTOR), 0);
-  assert.equal(r.becameMastered, true);
-  assert.equal(r.fast, true);
-  assert.equal(s.items[item.id].due, 7 * DAY);
-});
 
 test('fast but not solid does not master', () => {
   const s = mk(10, 5);
@@ -185,15 +169,6 @@ test('a run of solid ratings at full tempo starts new exercises at full tempo', 
   assert.equal(startTempo(s, fresh), Math.round(fresh.bpm * 0.7));
 });
 
-test('the skill check speed raises starting tempos, without an upper limit on progress', () => {
-  const s = mk(10, 5);
-  const fresh = ITEM_BY_ID['fd-lh'];
-  s.speed = 1.6;
-  assert.equal(startTempo(s, fresh), Math.round(fresh.bpm * 1.36));
-  const r = applyRating(s, 'fd-lh', 'solid', fresh.bpm * 2.5, 0);
-  assert.equal(r.fast, true);
-  assert.equal(s.items['fd-lh'].bpm, fresh.bpm * 2.5);
-});
 
 test('a demo is shown until the exercise has been played near its target tempo', () => {
   const s = mk(10, 5);
@@ -207,15 +182,6 @@ test('a demo is shown until the exercise has been played near its target tempo',
   assert.equal(knowsExercise(s, item), true);
 });
 
-test('three fast masteries in a row suggest moving up a level', () => {
-  const s = mk(10, 5);
-  for (const id of ['tq-five-r', 'tq-five-l']) applyRating(s, id, 'solid', ITEM_BY_ID[id].bpm * 1.3, 0);
-  assert.equal(suggestLevelUp(s), false);
-  applyRating(s, 'fd-rh', 'solid', ITEM_BY_ID['fd-rh'].bpm * 1.3, 0);
-  assert.equal(suggestLevelUp(s), true);
-  applyRating(s, 'fd-lh', 'hard', 50, 0);
-  assert.equal(suggestLevelUp(s), false);
-});
 
 test('speed check: steps down after a miss and places you at the highest level cleared', () => {
   // The case from a real backup: passages said level 3, the level 3 exercise reached only 54%.
@@ -251,8 +217,9 @@ test('too hard for now: D major makes way for G major, which comes back even if 
   assert.equal(easier.id, 'tq-g-ht');
   assert.equal(buildSession(s, 10).slots[0].item.id, 'tq-g-ht');
   assert.equal(s.items['tq-d-ht'].bpm, Math.round(ITEM_BY_ID['tq-d-ht'].bpm * 0.6));
-  // After a couple of sessions it is back in line, once G major is learned.
+  // After a couple of sessions it is back in line, once G major is secure (Solid on two days).
   applyRating(s, 'tq-g-ht', 'solid', 200, 0);
+  applyRating(s, 'tq-g-ht', 'solid', 200, DAY);
   completeSession(s, { done: [{ role: 'warmup', item: ITEM_BY_ID['tq-g-ht'] }], minutes: 10 });
   completeSession(s, { done: [{ role: 'warmup', item: ITEM_BY_ID['tq-g-ht'] }], minutes: 10 });
   assert.equal(buildSession(s, 10).slots[0].item.id, 'tq-d-ht');
@@ -269,36 +236,13 @@ test('two Hard ratings in a row are flagged; the first step of a track has nothi
   assert.equal(easierThan(ITEM_BY_ID['pc-ode']).id, 'cl-melody-alberti');
 });
 
-test('technique targets rise with Solid ratings: your tempo + 5% or the old target + 10%', () => {
-  const s = mk(10, 4);
-  const g = ITEM_BY_ID['tq-g-ht']; // target 76
-  const r = applyRating(s, g.id, 'solid', 95, 0); // well above: mastered, and the target follows you
-  assert.equal(r.becameMastered, true);
-  assert.equal(targetOf(s, g), 100);
-  applyRating(s, g.id, 'solid', 100, 0); // review at the new target: + 10%
-  assert.equal(targetOf(s, g), 110);
-  applyRating(s, g.id, 'ok', 110, 0); // Getting there changes nothing
-  assert.equal(targetOf(s, g), 110);
-  applyRating(s, g.id, 'solid', 80, 0); // Solid but well under target: no rise
-  assert.equal(targetOf(s, g), 110);
-});
 
-test('the target stops at about 170 notes a minute, and genre exercises keep theirs', () => {
-  const s = mk(10, 4);
-  const c = ITEM_BY_ID['tq-c-ht'];
-  for (let i = 0; i < 20; i++) applyRating(s, c.id, 'solid', targetOf(s, c), 0);
-  assert.equal(targetOf(s, c), 170); // quarter notes: 170 notes a minute
-  const e = ITEM_BY_ID['tq-c-eighths'];
-  assert.equal(maxTarget(e), 85); // eighth notes: 170 notes a minute is 85 beats
-  const jz = ITEM_BY_ID['jz-swing'];
-  applyRating(s, jz.id, 'solid', 140, 0);
-  assert.equal(targetOf(s, jz), jz.bpm);
-});
 
 test('a mastered exercise comes back in new keys, after new exercises and a couple of sessions', () => {
   const s = mk(10, 4, ['blues']);
   const form = ITEM_BY_ID['bl-form'];
-  applyRating(s, form.id, 'solid', form.bpm * 1.3, 0); // mastered in one go
+  applyRating(s, form.id, 'solid', form.bpm * 1.3, 0);
+  applyRating(s, form.id, 'solid', form.bpm * 1.3, DAY); // secure: two days
   const ids = (l) => l.map((x) => x.id);
   assert.ok(!ids(remaining(s, 'blues')).includes('bl-form~1')); // waits two sessions
   s.sessions += 2;
@@ -312,6 +256,7 @@ test('a mastered exercise comes back in new keys, after new exercises and a coup
   // the next key opens only once this one is mastered
   assert.ok(!ids(remaining(s, 'blues')).includes('bl-form~2'));
   applyRating(s, 'bl-form~1', 'solid', 500, 0);
+  applyRating(s, 'bl-form~1', 'solid', 500, DAY);
   s.sessions += 2;
   assert.ok(ids(remaining(s, 'blues')).includes('bl-form~2'));
 });
@@ -322,4 +267,97 @@ test('exercises below your level do not open new keys; scales and pieces have no
   assert.equal(versionsShown(s, 'bl-form').length, 0);
   assert.equal(KEY_VERSIONS['tq-g-ht'], undefined);
   assert.equal(KEY_VERSIONS['pc-ode'], undefined);
+});
+
+test('secure takes Solid at the target on two different days', () => {
+  const s = mk(10, 5);
+  const item = ITEM_BY_ID['tq-five-r'];
+  assert.equal(applyRating(s, item.id, 'solid', item.bpm, 0).becameMastered, false);
+  assert.equal(applyRating(s, item.id, 'solid', item.bpm, 3600000).becameMastered, false); // same day
+  const r = applyRating(s, item.id, 'solid', item.bpm, DAY);
+  assert.equal(r.becameMastered, true);
+  assert.equal(r.stageUp, 1);
+  assert.equal(s.items[item.id].due, DAY + 3 * DAY);
+});
+
+test('playing well above the target counts towards later stages, but each still needs two days', () => {
+  const s = mk(10, 5);
+  const g = ITEM_BY_ID['tq-g-ht'];
+  const [t1, t2, t3] = stageTempos(g);
+  assert.deepEqual([t1, t2, t3], [76, 95, 170]);
+  applyRating(s, g.id, 'solid', 128, 0);
+  assert.equal(stageOf(s, g), 0);
+  const r = applyRating(s, g.id, 'solid', 128, DAY);
+  assert.equal(r.stageUp, 2); // secure and fluent at once: 128 is above 95
+  assert.equal(targetOf(s, g), 170);
+  applyRating(s, g.id, 'solid', 175, 2 * DAY);
+  applyRating(s, g.id, 'solid', 175, 3 * DAY);
+  assert.equal(stageOf(s, g), 3);
+});
+
+test('a Hard rating restarts the days for the stage you are working on', () => {
+  const s = mk(10, 5);
+  const item = ITEM_BY_ID['tq-five-r'];
+  applyRating(s, item.id, 'solid', item.bpm, 0);
+  applyRating(s, item.id, 'hard', item.bpm, DAY);
+  assert.equal(applyRating(s, item.id, 'solid', item.bpm, 2 * DAY).becameMastered, false);
+});
+
+test('feel exercises: each stage is its own goal, and they keep coming back to refine', () => {
+  const s = mk(10, 5);
+  const b = ITEM_BY_ID['lt-bossa'];
+  assert.deepEqual(stageTempos(b), [b.bpm, b.bpm, b.bpm]);
+  for (let d = 0; d < 6; d++) applyRating(s, b.id, 'solid', b.bpm, d * DAY); // one stage per two days
+  assert.equal(stageOf(s, b), 3);
+  assert.ok(stageGoal(s, b).startsWith('Keep refining'));
+  for (let d = 6; d < 16; d++) applyRating(s, b.id, 'solid', b.bpm, d * DAY);
+  assert.ok(s.items[b.id].ivl <= 14);
+});
+
+test('speed exercises in genres reach their playing tempo; scales reach about 170 notes a minute', () => {
+  assert.deepEqual(stageTempos(ITEM_BY_ID['jz-walk']), [100, 125, 160]);
+  assert.equal(stageTempos(ITEM_BY_ID['tq-c-ht'])[2], 170);
+  assert.equal(maxTarget(ITEM_BY_ID['tq-c-eighths']), 85);
+});
+
+test('the skill check speed raises starting tempos', () => {
+  const s = mk(10, 5);
+  const fresh = ITEM_BY_ID['fd-lh'];
+  s.speed = 1.6;
+  assert.equal(startTempo(s, fresh), Math.round(fresh.bpm * 1.36));
+});
+
+test('three exercises secured well above tempo suggest moving up a level', () => {
+  const s = mk(10, 5);
+  for (const id of ['tq-five-r', 'tq-five-l', 'fd-rh']) {
+    applyRating(s, id, 'solid', ITEM_BY_ID[id].bpm * 1.3, 0);
+    applyRating(s, id, 'solid', ITEM_BY_ID[id].bpm * 1.3, DAY);
+  }
+  assert.equal(suggestLevelUp(s), true);
+  applyRating(s, 'fd-lh', 'hard', 50, 0);
+  assert.equal(suggestLevelUp(s), false);
+});
+
+test('levels skip technique and foundations only, never genre exercises', () => {
+  const s = mk(10, 5, ['jazz']);
+  applyLevel(s, 3);
+  assert.equal(s.items['tq-five-r'].st, 'skipped');
+  assert.equal(s.items['jz-swing'], undefined);
+  assert.deepEqual(trackProgress(s, 'jazz'), { done: 0, mastered: 0, known: 0, total: 5 });
+});
+
+test('older progress: fast one-go masteries go back to learning with one day counted', () => {
+  const s = mk(10, 5, ['jazz']);
+  s.items['tq-g-ht'] = { st: 'mastered', solid: 1, reps: 3, last: 1000, bpm: 128, top: 128, target: 134, ivl: 7, due: 0 };
+  s.items['jz-walk'] = { st: 'mastered', solid: 2, reps: 2, last: 0, bpm: 145, top: 145, ivl: 7, due: 0 };
+  s.items['jz-swing'] = { st: 'skipped', solid: 0, reps: 0 };
+  s.items['tq-c-r'] = { st: 'skipped', solid: 0, reps: 0 };
+  migrateProgress(s);
+  assert.equal(s.items['tq-g-ht'].st, 'learning');
+  assert.equal(s.items['tq-g-ht'].target, undefined);
+  assert.equal(s.items['jz-walk'].stage, 1);
+  assert.equal(s.items['jz-swing'], undefined);
+  assert.equal(s.items['tq-c-r'].st, 'skipped');
+  // one more Solid on another day: secure, and fluent too at 128
+  assert.equal(applyRating(s, 'tq-g-ht', 'solid', 128, DAY).stageUp, 2);
 });
