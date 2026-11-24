@@ -9,7 +9,8 @@ import { PLAYER_STARTS, speciesName, cloneGenome } from './genome.js';
 import { drawCell } from './cellDraw.js';
 import { PARTS } from './parts.js';
 import { RNG, formatTime } from './util.js';
-import { BIOMES } from './environment.js';
+import { BIOMES, ERAS } from './environment.js';
+import { SaveStore, deserialize } from './save.js';
 
 const $ = (id) => document.getElementById(id);
 const SIM_DT = 1 / 30;
@@ -31,6 +32,8 @@ const state = {
 const canvas = $('game');
 const hud = new HUD();
 const editor = new Editor(onEditorDone);
+const saves = new SaveStore();
+let savedGame = null;
 
 // ---------------------------------------------------------------- worlds
 
@@ -48,6 +51,75 @@ function setWorld(w) {
     state.renderer.world = w;
     state.renderer.buildBackground();
   }
+}
+
+// ---------------------------------------------------------------- saving
+
+function hasLineage() {
+  const w = state.world;
+  return !!(w && w.playerSpecies && !w.gameOver);
+}
+
+function saveMeta() {
+  return { goalsDone: [...state.goalsDone], won: state.won, speed: state.speed };
+}
+
+function saveGame(cloud = true) {
+  if (!hasLineage()) return;
+  saves.save(state.world, saveMeta(), { cloud });
+}
+
+function ago(ms) {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+
+async function refreshContinue() {
+  savedGame = await saves.peek();
+  const has = !!savedGame;
+  $('continue-card').hidden = !has;
+  $('new-label').hidden = !has;
+  $('btn-start').textContent = has ? 'Begin a new lineage' : 'Begin';
+  if (!has) return;
+  const sm = savedGame.summary || {};
+  $('cc-name').textContent = sm.name || 'Your lineage';
+  const era = ERAS[sm.era] ? ERAS[sm.era].name : '';
+  const where = savedGame.source === 'account' ? 'your account' : 'this device';
+  $('cc-meta').textContent = `Generation ${sm.generation ?? 1} · ${formatTime(sm.time || 0)} played${era ? ` · ${era}` : ''} · saved ${ago(savedGame.savedAt)} on ${where}`;
+}
+
+function continueGame() {
+  if (!savedGame) return;
+  let restored;
+  try {
+    restored = deserialize(savedGame.snapshot);
+  } catch {
+    $('cc-meta').textContent = 'This save could not be loaded.';
+    return;
+  }
+  const { world: w, meta } = restored;
+  setWorld(w);
+  state.goalsDone = new Set(meta.goalsDone || []);
+  state.won = !!meta.won;
+  state.speed = meta.speed || 1;
+  $('btn-speed').textContent = `${state.speed}×`;
+  if (w.player) {
+    state.renderer.cam.x = w.player.x;
+    state.renderer.cam.y = w.player.y;
+  }
+  setMode('play');
+  hud.update(0, w, state.renderer, true);
+  hud.toast(`<b>Welcome back.</b> ${w.playerSpecies ? w.playerSpecies.name : 'Your lineage'}, generation ${w.progress.generation}.`, 'good', 5);
+}
+
+function updateSaveStatus() {
+  const parts = [];
+  if (saves.lastSaved) parts.push(`Saved ${ago(saves.lastSaved)} on this device`);
+  if (saves.lastCloudSaved) parts.push(`to your account ${ago(saves.lastCloudSaved)}`);
+  $('save-status').textContent = parts.length ? `${parts.join(', ')}. Progress saves automatically.` : 'Your progress saves automatically.';
 }
 
 function startGame() {
@@ -83,6 +155,8 @@ function setMode(mode) {
   if (mode !== 'editor') editor.open_ && editor.close();
   hud.show(mode !== 'title' && mode !== 'editor');
   if (mode === 'eco') renderEco(state.world);
+  if (mode === 'pause') updateSaveStatus();
+  if (mode === 'title') refreshContinue();
 }
 
 function openHelp(from) {
@@ -154,6 +228,7 @@ function showOver(kind) {
     $('over-title').textContent = 'Your lineage is gone';
     $('over-text').textContent = `The last of ${w.playerSpecies?.name || 'your species'} died of ${cause}. The pond carries on without you.`;
     $('btn-continue').hidden = true;
+    saves.clear().then(() => (savedGame = null));
   }
   setMode('over');
 }
@@ -234,6 +309,7 @@ function onEditorDone(info) {
   if (info.cost) parts.push(`${info.cost} DNA spent`);
   hud.toast(`<b>Divided.</b> Generation ${state.world.player.generation}${parts.length ? ` · ${parts.join(' · ')}` : ''}.`, 'good', 5);
   if (info.newGene) hud.toast(`${PARTS[info.newGene].name} is now part of your genome.`, 'gene', 5);
+  saveGame();
 }
 
 function tryDivide() {
@@ -341,6 +417,11 @@ function applyControls() {
 // ---------------------------------------------------------------- buttons
 
 $('btn-start').addEventListener('click', startGame);
+$('btn-continue-save').addEventListener('click', continueGame);
+$('btn-save-now').addEventListener('click', () => {
+  saveGame();
+  updateSaveStatus();
+});
 $('btn-reroll').addEventListener('click', rerollName);
 $('btn-howto').addEventListener('click', () => openHelp('title'));
 $('btn-help2').addEventListener('click', () => openHelp('pause'));
@@ -357,8 +438,16 @@ sprint.addEventListener('pointerdown', () => (state.sprintHeld = true));
 sprint.addEventListener('pointerup', () => (state.sprintHeld = false));
 sprint.addEventListener('pointerleave', () => (state.sprintHeld = false));
 $('btn-quit').addEventListener('click', () => {
+  saveGame();
   setWorld(makeAttractWorld());
   setMode('title');
+});
+// Save when the tab is hidden or closed, so leaving never loses progress.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state.mode !== 'title') saveGame();
+});
+window.addEventListener('pagehide', () => {
+  if (state.mode !== 'title' && hasLineage()) saves.saveLocal(state.world, saveMeta());
 });
 $('btn-again').addEventListener('click', () => {
   setWorld(makeAttractWorld());
@@ -381,6 +470,8 @@ window.addEventListener('resize', () => {
 let last = performance.now();
 let acc = 0;
 let ecoTimer = 0;
+let autosaveTimer = 20;
+let cloudTimer = 60;
 
 function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
@@ -416,6 +507,15 @@ function frame(now) {
     if (state.mode === 'play') {
       hud.update(dt, w, r);
       checkGoals(dt);
+      // Autosave: locally every 20 s, to the account every minute.
+      autosaveTimer -= dt;
+      cloudTimer -= dt;
+      if (autosaveTimer <= 0) {
+        autosaveTimer = 20;
+        const cloud = cloudTimer <= 0;
+        if (cloud) cloudTimer = 60;
+        saveGame(cloud);
+      }
     }
     if (state.mode === 'eco') {
       ecoTimer -= dt;
@@ -436,4 +536,4 @@ setMode('title');
 requestAnimationFrame(frame);
 
 // Debug handle for the console.
-window.primordia = { state, cloneGenome };
+window.primordia = { state, cloneGenome, editor, saves };

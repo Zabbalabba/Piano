@@ -11,6 +11,17 @@ This is the first playable draft of the **cell stage**.
 
 Controls: WASD or arrow keys, or hold the mouse button (or your finger) to swim toward the pointer. Shift sprints. E or Space releases toxin. R divides. Tab opens the ecosystem view, P pauses and the mouse wheel zooms.
 
+## Saving
+
+The game saves automatically every 20 seconds, after each division, and whenever the tab is hidden or closed. **Continue** on the title screen picks up where you left off, and the pause menu has a **Save now** button.
+
+Saves go to two places (`js/save.js`):
+
+- **This browser's localStorage.** Always used, and works offline.
+- **A private document in your claude.ai account,** when the game runs as a claude.ai artifact. It lives under `data/users/<your id>/save`, which only you can read. The save is gzip-compressed to about 40 KB, and lets the lineage continue on another device, such as your phone. Writing it needs Contributor access or higher, so view-only visitors get local saves only.
+
+When loading, the newer of the two saves wins. When your lineage dies out, the save is deleted. `npm run savetest` checks that a save and restore round trip keeps the world intact.
+
 ## Core loop
 
 1. **Swim, eat, survive.** Food that a cell can't digest gives it nothing, and a mouth only works on the side it faces.
@@ -18,6 +29,10 @@ Controls: WASD or arrow keys, or hold the mouse button (or your finger) to swim 
 3. **Divide.** The editor opens with:
    - **Three free mutation offers.** They are weighted by what this generation actually went through (stress-induced mutation). For example, time spent near your cold limit brings up Antifreeze, and attacks from behind bring up rear armor or spikes.
    - **DNA spending.** You can buy any unlocked part, change size or membrane thickness, and move parts around.
+     - Each part tile has **− / +** buttons. Plus places a copy at a sensible spot. Minus takes back copies added this division, but never goes below what your cell already had. Losing an inherited part is a separate, deliberate action on the selected part.
+     - The cell view zooms (buttons, mouse wheel or pinch) and pans (drag empty space).
+     - The **On this cell** list selects any part, even where parts overlap; clicking an overlapping spot again cycles through the parts there. A selected part can be rotated in 15° steps or with a slider.
+     - The DNA / Cost / Left readout is pinned to the Divide bar, so it stays visible while you scroll.
    - **Live stats and a habitat forecast.** These show how the new body would do in each habitat, both now and in the next era.
 4. **Your lineage persists.** Each division adds a sibling. If you die you continue as the nearest relative. If every member dies, the lineage is extinct.
 
