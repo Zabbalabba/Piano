@@ -133,9 +133,21 @@ function oldestMastered(state, exclude) {
   return list.length ? ITEM_BY_ID[list[0][0]] : null;
 }
 
-function pickWarmup(state) {
-  const left = remaining(state, 'technique');
+// A warm-up played Solid at 150% or more of its target on its first day makes way for the next
+// one: it is clearly not new to you. It comes back as the warm-up a couple of days later, where
+// Solid confirms it as Secure (the second day).
+export const FAST_MOVE_ON = 1.5;
+const CONFIRM_AFTER_DAYS = 2;
+
+function pickWarmup(state, now = Date.now()) {
+  const waiting = (it) => { const p = state.items[it.id]; return p && p.confirmDue && (p.stage || 0) === 0; };
+  const due = TRACK_ITEMS.technique.filter((it) => waiting(it) && state.items[it.id].confirmDue <= now)
+    .sort((a, b) => state.items[a.id].confirmDue - state.items[b.id].confirmDue);
+  if (due.length) return due[0];
+  const left = remaining(state, 'technique').filter((it) => !waiting(it));
   if (left.length) return left[0];
+  const pending = remaining(state, 'technique');
+  if (pending.length) return pending[0];
   const all = TRACK_ITEMS.technique;
   return all[state.sessions % all.length];
 }
@@ -199,11 +211,11 @@ export function buildSession(state, minutes, now = Date.now()) {
     const turn = state.sessions % 3;
     const due = dueReviews(state, now, used);
     if (turn === 2 && due.length) add('review', due[0]);
-    else if (turn === 1) add('warmup', pickWarmup(state));
+    else if (turn === 1) add('warmup', pickWarmup(state, now));
     else pickFocus(state, 1, used).forEach((it) => slots.push({ role: 'focus', item: it }));
-    if (!slots.length) add('warmup', pickWarmup(state));
+    if (!slots.length) add('warmup', pickWarmup(state, now));
   } else {
-    add('warmup', pickWarmup(state));
+    add('warmup', pickWarmup(state, now));
     let focusCount = roles.filter((r) => r === 'focus').length;
     let review = null;
     const due = dueReviews(state, now, used);
@@ -425,6 +437,13 @@ export function applyRating(state, id, rating, tempo, now = Date.now()) {
   if (rating === 'hard') p.bpm = Math.max(Math.round(item.bpm * 0.5), Math.round(tempo * 0.9));
   else if (rating === 'solid' && !atTempo) p.bpm = Math.min(target, Math.round(tempo * 1.12));
   else p.bpm = tempo;
+
+  // A fast first day on a warm-up: move on, and confirm it in a couple of days.
+  if (item.track === 'technique' && stage === 0 && rating === 'solid' && tempo >= item.bpm * FAST_MOVE_ON) {
+    p.confirmDue = now + CONFIRM_AFTER_DAYS * DAY;
+  } else if (stage >= 1 || rating !== 'solid') {
+    delete p.confirmDue;
+  }
 
   if (stage >= 1) {
     p.st = 'mastered';

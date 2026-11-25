@@ -361,3 +361,26 @@ test('older progress: fast one-go masteries go back to learning with one day cou
   // one more Solid on another day: secure, and fluent too at 128
   assert.equal(applyRating(s, 'tq-g-ht', 'solid', 128, DAY).stageUp, 2);
 });
+
+test('a warm-up played Solid at 150% of its target makes way for the next, and comes back to be confirmed', () => {
+  const s = mk(10, 4);
+  applyLevel(s, 2);
+  const first = buildSession(s, 10, 0).slots[0].item;
+  assert.equal(first.id, 'tq-c-ht');
+  applyRating(s, first.id, 'solid', first.bpm * 2.6, 0);
+  completeSession(s, { done: [{ role: 'warmup', item: first }], minutes: 10 }, 0);
+  const next = buildSession(s, 10, DAY).slots[0].item;
+  assert.notEqual(next.id, first.id); // moved on the next day
+  const later = buildSession(s, 10, 2 * DAY + 1).slots[0].item;
+  assert.equal(later.id, first.id); // back after two days
+  assert.equal(applyRating(s, first.id, 'solid', first.bpm * 2.6, 2 * DAY + 1).becameMastered, true);
+  assert.equal(s.items[first.id].confirmDue, undefined);
+});
+
+test('a warm-up at an ordinary tempo stays the warm-up until it is secure', () => {
+  const s = mk(10, 4);
+  applyLevel(s, 2);
+  const first = buildSession(s, 10, 0).slots[0].item;
+  applyRating(s, first.id, 'solid', first.bpm, 0);
+  assert.equal(buildSession(s, 10, DAY).slots[0].item.id, first.id);
+});
