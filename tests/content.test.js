@@ -106,3 +106,29 @@ test('standard fingerings: C major scale and a C chord', () => {
   assert.equal(f('fd-chords', 'lh').split(' ')[0], '5+3+1');
   assert.equal(f('tq-inv-c', 'rh').split(' ').slice(0, 3).join(' '), '1+3+5 1+2+5 1+3+5');
 });
+
+test('no crossed fingers: a higher finger never plays a lower note within a beat, except thumb under/over or leaps past an octave', () => {
+  const WHITE = [0, 0.5, 1, 1.5, 2, 3, 3.5, 4, 4.5, 5, 5.5, 6];
+  const pos = (m) => Math.floor(m / 12) * 7 + WHITE[m % 12];
+  const bad = [];
+  for (const item of ALL_ITEMS) {
+    const p = parseExercise(item);
+    for (const [voice, sign] of [[p.rh, 1], [p.lh, -1]]) {
+      let prev = null;
+      for (const bar of voice || []) {
+        for (const t of bar) {
+          if (t.rest || t.notes.length > 1) { prev = null; continue; }
+          const cur = { x: sign * pos(noteToMidi(t.notes[0])), f: t.fingers[0], beats: t.beats };
+          if (prev && prev.beats <= 1 && cur.f !== prev.f) {
+            const d = cur.x - prev.x;
+            const natural = d === 0 || (cur.f > prev.f) === (d > 0);
+            const thumbMove = Math.min(cur.f, prev.f) === 1 && Math.abs(d) <= 3; // thumb under/over, up to a fourth in arpeggios
+            if (!natural && !thumbMove && Math.abs(d) < 8) bad.push(`${item.id}: ${prev.f} then ${cur.f} on ${t.notes[0]}`);
+          }
+          prev = cur;
+        }
+      }
+    }
+  }
+  assert.deepEqual(bad, []);
+});

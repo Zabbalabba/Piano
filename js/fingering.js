@@ -15,7 +15,6 @@ const isBlack = (midi) => [1, 3, 6, 8, 10].includes(((midi % 12) + 12) % 12);
 
 // Widest comfortable distance between two fingers, in white keys (a fifth is 4, an octave 7).
 const MAX_SPAN = { 12: 3.5, 13: 4.5, 14: 5.5, 15: 7.5, 23: 2.5, 24: 3.5, 25: 7, 34: 2, 35: 3.5, 45: 2.5 };
-const JUMP = 6;
 
 // Fingers for a block chord, thumb side first.
 function chordShape(semis) {
@@ -47,19 +46,22 @@ function stepCost(xa, fa, xb, fb) {
   const d = xb - xa;
   if (d === 0) return fa === fb ? 0 : 1;
   const ad = Math.abs(d);
-  // Moving the hand to a new place is natural for a leap, a last resort for a small step.
-  const jump = (ad >= 4 ? 3 : JUMP) + 0.15 * ad;
-  if (fa === fb) return Math.min(jump, 4 + ad * 0.3);
   const lo = Math.min(fa, fb);
   const hi = Math.max(fa, fb);
+  // The same finger on a new note: fine for a leap (the hand moves), clumsy for a step.
+  if (fa === fb) return (ad >= 7 ? 3.5 : 6) + 0.15 * ad;
   if ((fb > fa) === (d > 0)) {
-    // Natural direction: higher finger, higher note.
+    // Natural direction: higher finger, higher note. Beyond the stretch, the hand moves.
     if (ad <= MAX_SPAN[lo * 10 + hi]) return Math.abs(ad - (hi - lo)) * 0.6;
-    return jump;
+    return 3 + 0.15 * ad;
   }
   // Thumb under, or a finger crossing over the thumb, by a step or two.
   if (lo === 1 && hi <= 4 && ad <= (hi === 2 ? 1 : 2)) return { 2: 2.6, 3: 2, 4: 2.4 }[hi] + ad * 0.2;
-  return jump;
+  // In arpeggios the thumb passes a fourth.
+  if (lo === 1 && hi <= 3 && ad <= 3) return 3.2 + ad * 0.2;
+  // Any other crossing is only reasonable when the hand leaps more than an octave anyway.
+  if (ad >= 8) return 4 + 0.15 * ad;
+  return 12 + 0.15 * ad;
 }
 
 function noteCost(midi, f, short) {

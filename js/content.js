@@ -235,7 +235,7 @@ const OOM_F = 'F2/q F3+A3 C3 F3+A3';
 const OOM_G7 = 'G2/q F3+B3 D3 F3+B3';
 const POP_ROOTS = ['C3', 'G2', 'A2', 'F2'];
 const BROKEN = '1@5/e 5@2 8@1 5@2 1@5 5@2 8@1 5@2';
-const BOSSA_BASS = '1/q. 5/e 5/q. 1/e';
+const BOSSA_BASS = '1@5/q. 5@1/e 5@1/q. 1@5/e';
 const bossaBass = seq(['D3', 'G2', 'C3', 'C3'], BOSSA_BASS);
 const bossaA = (c) => `${c}/q r/e ${c}/e r/q ${c}/q`;
 const bossaB = (c) => `r/e ${c}/e r/q ${c}/q r/q`;
@@ -243,7 +243,7 @@ const bossaComp = bars(bossaA('F4+A4+C5'), bossaB('F4+G4+B4'), bossaA('E4+G4+B4'
 const BOOM_G = 'G2/q B3+D4 D3 B3+D4';
 const BOOM_C = 'C3/q C4+E4 G2 C4+E4';
 const BOOM_D7 = 'D3/q F#3+C4 A2 F#3+C4';
-const HAB = '1/q. 5/e 8/q 5';
+const HAB = '1@5/q. 5@2/e 8@1/q 5@2';
 const montuno = {
   C: 'C4/e E4 G4 C5/q G4/e E4/q', F: 'C4/e F4 A4 C5/q A4/e F4/q', G: 'B3/e D4 G4 B4/q G4/e D4/q',
 };
@@ -585,7 +585,7 @@ const TRACKS = {
     },
     {
       id: 'rb-68', lv: 2, bpm: 80, ts: [6, 8], t: 'Soul ballad arpeggios',
-      lh: 'C3/e G3 C4 E4 C4 G3 | A2 E3 A3 C4 A3 E3 | F2 C3 F3 A3 F3 C3 | G2 D3 G3 B3 G3 D3',
+      lh: 'C3@5/e G3@2 C4@1 E4@3 C4@1 G3@2 | A2@5 E3@2 A3@1 C4@3 A3@1 E3@2 | F2@5 C3@2 F3@1 A3@3 F3@1 C3@2 | G2@5 D3@2 G3@1 B3@3 G3@1 D3@2',
       focus: 'Six flowing eighths per bar, a classic slow soul ballad accompaniment.',
       gain: 'Builds a flowing, even left hand in six-eight time.',
       tip: 'Count "1-2-3 4-5-6" with a small lean on 1 and 4.',
@@ -990,8 +990,8 @@ const PIECES = {
     {
       id: 'pc-velvet', lv: 2, bpm: 80, perf: 96, ts: [6, 8], t: 'Velvet Six-Eight', src: 'Original for this app',
       rh: 'E5/q. G5 | E5 C5 | A4 C5 | B4 D5 | E5/q G5/e E5/q. | C5/q E5/e C5/q. | A4/q C5/e F5/q. | D5/h.',
-      lh: rep('C3/e G3 C4 E4 C4 G3 | A2 E3 A3 C4 A3 E3 | F2 C3 F3 A3 F3 C3 | G2 D3 G3 B3 G3 D3 |', 1) +
-        ' C3/e G3 C4 E4 C4 G3 | A2 E3 A3 C4 A3 E3 | F2 C3 F3 A3 F3 C3 | G2 D3 G3 B3 G3 D3',
+      lh: rep('C3@5/e G3@2 C4@1 E4@3 C4@1 G3@2 | A2@5 E3@2 A3@1 C4@3 A3@1 E3@2 | F2@5 C3@2 F3@1 A3@3 F3@1 C3@2 | G2@5 D3@2 G3@1 B3@3 G3@1 D3@2 |', 1) +
+        ' C3@5/e G3@2 C4@1 E4@3 C4@1 G3@2 | A2@5 E3@2 A3@1 C4@3 A3@1 E3@2 | F2@5 C3@2 F3@1 A3@3 F3@1 C3@2 | G2@5 D3@2 G3@1 B3@3 G3@1 D3@2',
     },
     {
       id: 'pc-corner', lv: 3, bpm: 88, perf: 100, t: 'Corner Store Groove', src: 'Original for this app',
