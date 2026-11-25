@@ -64,10 +64,12 @@ function stepCost(xa, fa, xb, fb) {
   return 12 + 0.15 * ad;
 }
 
-function noteCost(midi, f, short) {
+// In a line of single notes the thumb (and, less so, the little finger) stays off black keys: that
+// is the rule behind every standard scale fingering. In chords it matters less.
+function noteCost(midi, f, short, inChord = false) {
   let c = f === 4 ? 0.1 : 0;
-  if (isBlack(midi) && f === 1) c += short ? 1.5 : 0.8;
-  if (isBlack(midi) && f === 5) c += 0.4;
+  if (isBlack(midi) && f === 1) c += inChord ? 0.8 : short ? 3.5 : 3;
+  if (isBlack(midi) && f === 5) c += inChord ? 0.4 : 1;
   return c;
 }
 
@@ -109,7 +111,7 @@ export function assignFingers(bars, hand) {
       return (fixed ? [fixed] : [1, 2, 3, 4, 5]).map((f) => ({ xs, fs: [f], own: noteCost(midis[0], f, tok.beats < 1) }));
     }
     const fs = tok.fixed.every(Boolean) ? tok.fixed : chordFingers(midis, hand).map((f, i) => tok.fixed[i] || f);
-    return [{ xs, fs, own: midis.reduce((a, m, i) => a + noteCost(m, fs[i], false), 0) }];
+    return [{ xs, fs, own: midis.reduce((a, m, i) => a + noteCost(m, fs[i], false, true), 0) }];
   });
   if (!toks.length) return;
   // Shortest path through the options.
